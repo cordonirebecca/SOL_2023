@@ -1,0 +1,3 @@
+/home/rebecca/CLionProjects/SOL/cmake-build-debug/CMakeFiles/SOL.dir
+/home/rebecca/CLionProjects/SOL/cmake-build-debug/CMakeFiles/edit_cache.dir
+/home/rebecca/CLionProjects/SOL/cmake-build-debug/CMakeFiles/rebuild_cache.dir

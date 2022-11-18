@@ -13,18 +13,11 @@
 #include <errno.h>
 #include <sys/stat.h>
 #include "list.h"
-#include <limits.h>
-#include "auxiliaryMW.h"
+//#include "auxiliaryMW.h"
 #include <ctype.h>
+#include <limits.h>
+#include<dirent.h>
 #define UNIX_PATH_MAX 255
-
-int numberThreads=4;
-int lenghtTail =8;
-const char* directoryName;
-char path_assoluto [UNIX_PATH_MAX+1];
-int tempo=0;
-
-
 
 #define ec_meno1(s,m) \
     if((s)==-1) {perror(m); exit(EXIT_FAILURE); \
@@ -36,60 +29,13 @@ int tempo=0;
 
 
 
-int isCurrentDirOrParentDir(char *nomeDirectory)
-{
-    if (strcmp(nomeDirectory, ".") == 0)
-    {
-        return 1;
-    }
-    else if(strcmp(nomeDirectory, "..") == 0)
-    {
-        return 2;
-    }
-    else
-    {
-        return 0;
-    }
-}
-
-char* getPathAssoluto(const char *path_relativo){
-    char *path;
-    printf("path relativo nella funzione:%s\n",path_relativo);
-    path = realpath(path_relativo, path_assoluto);
-    if((path== NULL) && (errno==EACCES)){
-        perror("Permesso di lettura o ricerca negato per un componente del prefisso del percorso.\n");
-        return NULL;
-    }
-    else if((path== NULL) && (errno==EINVAL)){
-        perror("il percorso è NULL\n");
-        return NULL;
-    }
-    else if((path== NULL) && (errno==EIO)){
-        perror("Si è verificato un errore di I/O durante la lettura dal filesystem\n");
-        return NULL;
-    }
-    else if((path== NULL) && (errno==ELOOP)){
-        perror("sono stati rilevati troppi collegamenti simbolici durante la traduzione del percorso.\n");
-        return NULL;
-    }
-    else if((path== NULL) && (errno==ENAMETOOLONG)){
-        perror("Un componente di un percorso ha superato i caratteri NAME_MAX o un intero percorso ha superato i caratteri PATH_MAX. \n");
-        return NULL;
-    }
-    else if((path== NULL) && (errno==ENOENT)){
-        perror("Il file denominato non esiste.\n");
-        return NULL;
-    }
-    else if((path== NULL) && (errno==ENOMEM)){
-        perror("Memoria esaurita.\n");
-        return NULL;
-    }
-    else if((path== NULL) && (errno==ENOTDIR)){
-        perror("Un componente del prefisso del percorso non è una directory.\n");
-        return NULL;
-    }
-    return path_assoluto;
-}
+int numberThreads=4;
+int lenghtTail =8;
+const char* directoryName;
+char path_assoluto [UNIX_PATH_MAX+1];
+char buf[PATH_MAX];
+char *res;
+int tempo=0;
 
 void signalMask(){
     struct sigaction sa;
@@ -123,256 +69,93 @@ void signalMask(){
     printf("arrivato segnale:%d\n",indiceSegnale);
 }
 
+void getPathAssoluto(char* directoryName){
+    char*res=realpath(directoryName, buf); // buf ha il path assoluto
+    if(res == NULL ){
+        if(errno == EACCES){
+            perror("Read or search permission was denied for a component of the path prefix.");
+        }else if(errno == EINVAL){
+            perror("path is NULL.");
+        }else if(errno == EIO){
+            perror("An I/O error occurred while reading from the filesystem.");
+        }else if(errno == ELOOP){
+            perror("Too many symbolic links were encountered in translating the pathname.");
+        }else if(errno == ENAMETOOLONG){
+            perror("A component of a pathname exceeded NAME_MAX characters, or an entire pathname exceeded PATH_MAX characters.");
+        }else if(errno == ENOENT){
+            perror("The named file does not exist.");
+        }else if(errno == ENOMEM){
+            perror("Out of memory.");
+        }else if(errno == ENOTDIR){
+            perror(" A component of the path prefix is not a directory.");
+        }
+    }
+}
+
 int parser(int argc, char*argv[]){
     int c;
     int i=1;
     char* option = NULL;
+    char*ptr;
     opterr=0;
-// manca il caso di default da analizzare
    while((c = getopt(argc, argv, "n:q:d:t:")) != -1){
        switch(c){
            case 'n':
-               //printf (" è arrivato -n \n");
+               printf (" è arrivato -n \n");
                ec_null(c,"main");
-               //printf("dentro\n");
-               //printf("optarg: %s\n",optarg);
-               //printf("c: %d\n",c);
-               //printf("optopt: %c\n",optopt);
-               if(strcmp(optarg,"-q")!= 0){
-                   numberThreads = atoi(optarg);
-               }else{
-                   numberThreads= 4;
-               }
-              // printf("numberThreads: %d\n", numberThreads);
+               numberThreads = atoi(optarg);
+               printf("numberThreads: %d\n", numberThreads);
                break;
 
            case 'q':
-               //printf (" è arrivato -q \n");
+               printf (" è arrivato -q \n");
                ec_null(c,"main");
-               //printf( " c: %d\n", c);
-               if(optopt == 0){
-                   lenghtTail = atoi(optarg);
-               }
-               //printf("lenghtail: %d\n", lenghtTail);
+               lenghtTail = atoi(optarg);
+               printf("lenghtail: %d\n", lenghtTail);
                break;
 
            case 'd':
-               //printf (" è arrivato -d \n");
+               printf (" è arrivato -d \n");
                ec_null(c,"main");
-               //printf( " argv: %c\n", c);
                directoryName= optarg;
-               directoryName=malloc(sizeof(char)*500);
-               directoryName=getcwd(directoryName,500);
-               printf("CLIENT: lavoro nella directory:%s\n",directoryName);
-               //directoryName=getPathAssoluto(directoryName);
-               printf("pathAssoluto: %s\n",directoryName);
+               printf("pathrelativoVero: %s\n",directoryName);
+               getPathAssoluto(directoryName);
+               printf("pathAsssolutoFUORI : %s\n", buf);
                break;
 
            case 't':
-               //printf (" è arrivato -t \n");
+               printf (" è arrivato -t \n");
                ec_null(c,"main");
                //printf( " argv: %c\n", c);
-               if(optopt == 0){
-                   tempo= atoi(optarg);
-               }
-               //printf("tempo: %d\n", tempo);
+               tempo= atoi(optarg);
+               printf("tempo: %d\n", tempo);
                break;
-
-           case '?':
-              // printf("optopt: %d\n",optopt);
-               //printf("optarg: %s\n",optarg);
-
-               printf("n: %d\n",'n');
-               return 1;
-
        }
    }
 }
 
 void* startWorker(void* tizio){
-
     int indiceWorker=(intptr_t) tizio;
-    //printf("sono lo schiavo numero %d\n",tizio);
-
-}
-
-/*Funzione che legge N file da una directory*/
-/*nel caso in cui siano presenti sottoDirectory, le visita ricorsivamente fino al raggiungimento di N*/
-int leggiNFileDaDirectory(int *numFile2,const char *dirName, char** arrayPath, int posizioneArray, short bitConteggio, int *numeroFileLetti)
-{
-    int chDirReturnValue=0;
-    int leggiTuttiIFile=0;
-    char *filename;
-    int closeDirReturnValue=0;
-    struct stat s;
-    int isFileCurrentDir = 0;
-    int chiamataRicorsivaReturnValue=0;
-    int isDirectory = 0;
-    int isFileRegolare = 0;
-    int chdirReturnValue=0;
-    int lunghezza=0;
-    char *path =NULL;
-    struct dirent *file = NULL;
-
-    if(numFile2 == NULL)
-    {
-        perror("ERRORE è stato passato alla funzione un valore non valido");
-        return -1;
-    }
-
-
-    leggiTuttiIFile = *numFile2 <= 0;
-    printf("dirName in funzione: %s\n",dirName);
-    DIR *dir = opendir(dirName);
-    if(errno==EACCES)
-    {
-        printf("ERRNO=EACCES");
-    }
-    if(errno==EBADF)
-    {
-        printf("ERRNO=EBADF");
-    }
-    if(errno==EMFILE)
-    {
-        printf("ERRNO=EMFILE");
-    }
-    if(errno==ENFILE)
-    {
-        printf("ERRNO=ENFILE");
-    }
-    if(errno==ENOENT)
-    {
-        printf("ERRNO=ENOENT");
-    }
-    if(errno==ENOMEM)
-    {
-        printf("ERRNO=ENOMEM");
-    }
-    if(errno==ENOTDIR)
-    {
-        printf("ERRNO=ENOTDIR");
-    }
-    if(dir==NULL)
-    {
-        perror("ERRORE nella funzione opendir\n");
-        return -1;
-    }
-
-    /* Eseguo operazione cd nella directory selezionata*/
-    chDirReturnValue=chdir(dirName);
-    if(chDirReturnValue==-1 && errno!=0)
-    {
-        perror("ERRORE nella funzione chdir\n");
-        return -1;
-    }
-
-
-    /*Leggo ogni entry presente nella directory fino a che non ho letto tutti i file oppure ho raggiunto il limite*/
-    while ((leggiTuttiIFile || *numFile2) && (file = readdir(dir)) != NULL)
-    {
-        filename = file->d_name;
-
-        stat(filename, &s);
-
-
-
-        isFileCurrentDir = isCurrentDirOrParentDir(filename);
-
-        isDirectory = S_ISDIR(s.st_mode);
-        isFileRegolare = S_ISREG(s.st_mode);
-
-        /*Tramite questi tre if, se ho selezionato un file*/
-        /*speciale lo salto, non considerandolo nel conteggio*/
-        if (isFileCurrentDir == 1 || isFileCurrentDir == 2)
-        {
-            continue;
-        }
-        else if (!isDirectory && !isFileRegolare)
-        {
-            /*se entro dentro questo if significato che*/
-            /*grazie all' utilizzo della struttura stat,*/
-            /*sono riuscito ad identificare che il file considerato in questo momento non*/
-            /*risulta un file regolare e nemmeno una directory*/
-            continue;
-        }
-        else if (isDirectory)
-        {
-            chiamataRicorsivaReturnValue = leggiNFileDaDirectory( numFile2,filename, arrayPath,posizioneArray,bitConteggio, numeroFileLetti);
-            if (chiamataRicorsivaReturnValue == -1)
-            {
-                closeDirReturnValue=closedir(dir);
-                if(closeDirReturnValue==-1 && errno!=0)
-                {
-                        perror("ERRORE nella funzione closedir\n");
-                        return -1;
-                }
-                printf("chiusa directory\n\n\n\n\n");
-            }
-            else
-            {
-
-
-                chdirReturnValue=chdir("..");
-                if(chdirReturnValue==-1 && errno!=0)
-                {
-                        perror("ERRORE nella funzione closedir\n");
-                }
-            }
-        }
-        else if (isFileRegolare)
-        {
-
-            if(bitConteggio == 0)
-            {
-                (*numeroFileLetti)++;
-            }
-            else
-            {
-                lunghezza=strlen(getPathAssoluto(filename))+1;
-                path=malloc(sizeof(char)*lunghezza);
-                path=getPathAssoluto(filename);
-                if(path==NULL)
-                {
-                    errno=EINVAL;
-                    return -1;
-                }
-
-                if(strcmp(arrayPath[posizioneArray],"")!=0)
-                {
-                    posizioneArray++;
-                }
-                strcpy(arrayPath[posizioneArray],path);
-            }
-            if (!leggiTuttiIFile)
-            {
-                (*numFile2)--;
-            }
-
-
-        }
-    }
-
-
-    closedir(dir);
-    printf("chiusa dir\n");
-
-    return 0;
 }
 
 int main(int argc, char* argv []){
     int pid;
     int status;
-    struct struttura_coda *comandi = malloc(sizeof(struct struttura_coda));
-    comandi->opzione=NULL;
-    comandi->next = NULL;
-    comandi->prec = NULL;
+    struct tail_of_files* element = malloc(sizeof(struct tail_of_files));
+    element->file=NULL;
+    element->next = NULL;
+    element->prec = NULL;
     pthread_t tid;
     pthread_t maskProducer;
     int sum;
+    int tot_files;
     int err;
     int fd_skt, fd_c;
     struct sockaddr_un sa;
     sa.sun_family=AF_UNIX;
+    int n=0, i=0;
+    DIR *d;
+    struct dirent *dir;
 
     //creo thread che si occupa della maschera segnali
     if(	pthread_create(&maskProducer, NULL, signalMask, NULL)!=0){
@@ -407,126 +190,72 @@ int main(int argc, char* argv []){
                 /* il figlio terminato con exit o return */
                 //printf("stato %d\n", WEXITSTATUS(status));
             }
-            //printf("ho aspettato il figlio sto morendo anch'io\n\n");
         }
     }//fine creazione collector
 
     //gestione parser
     parser(argc, argv);
 
-    //test directory
+    // apro la directory corrente per contare i miei file
+    d = opendir(directoryName);
 
-
-
-
-
-
-
-
-
-
-    char **arrayPath;
-    char* rest;
-    printf("CLIENT: lavoro nella directory:%s\n",directoryName);
-
-    /*Conto quanti file sono effettivamente presenti all' interno della direcotry richiesta*/
-    int bitConteggio=0,i=0,numFileLetti=0,numFile2=0;
-
-    int letturaDirectoryReturnValue=leggiNFileDaDirectory(&numFile2,directoryName,arrayPath,i,bitConteggio,&numFileLetti);
-
-
-    if(letturaDirectoryReturnValue != 0)
-    {
-        perror("Errore nella lettura dei file dalla directory\n");
+    // settiamo errno per opendir
+    if(errno == EACCES){
+        perror("Permission denied.");
     }
-
-    if(numFile2<=0 || numFile2>numFileLetti)
-    {
-        numFile2=numFileLetti;
-
+    else if(errno == EBADF){
+        perror("fd is not a valid file descriptor opened for reading.");
     }
-    bitConteggio=1;
-
-
-    arrayPath = malloc(numFile2 * sizeof(char *));
-    for(i=0; i<numFile2; i++)
-    {
-        arrayPath[i] = malloc(200 * sizeof(char));
-        strncpy(arrayPath[i],"",2);
+    else if(errno == EMFILE){
+        perror("The per-process limit on the number of open file descriptors has been reached.");
     }
-
-    i=0;
-
-    int salvaNumFile=numFile2;
-
-
-    /*Dopo essermi memorizzato la directory corrente da cui partivo, utilizzo la funzione chdir per ritornarci.
-    Questo risulta essere necessario perchè al procedura leggiNFileDaDirectory mi ha modificato al directory in cui sto lavorando.*/
-
-    int chdirReturnValue=chdir(directoryName);
-    if(chdirReturnValue != 0)
-    {
-        /*è stato settato errno*/
-        perror("Errore nell' utilizzo di chdir\n");
-        return -1;
+    else if(errno == ENFILE){
+        perror("The system-wide limit on the total number of open files has been reached.");
     }
-
-
-    letturaDirectoryReturnValue=leggiNFileDaDirectory(&numFile2,directoryName,arrayPath,i,bitConteggio,&numFileLetti);
-
-
-    chdirReturnValue=0;
-    chdirReturnValue=chdir(directoryName);
-    if(chdirReturnValue != 0)
-    {
-        /*è stato settato errno*/
-        perror("Errore nell' utilizzo di chdir\n");
-        return -1;
+    else if(errno == ENOENT){
+        perror("Directory does not exist, or name is an empty string.");
     }
-
-    if(letturaDirectoryReturnValue != 0)
-    {
-        perror("Errore nella lettura dei file dalla directory\n");
+    else if(errno == ENOMEM){
+        perror("Insufficient memory to complete the operation.");
     }
-    char * token=NULL;
-    char * pathRelativo;
-    for(i = 0; i < salvaNumFile; i++)
-    {
-        rest = arrayPath[i];
-
-        while ((token = strtok_r(rest, "/", &rest))!=NULL)
-        {
-            pathRelativo=token;
+    else if(errno == ENOTDIR){
+        perror("name is not a directory.");
+    }
+    
+    //conto tutti gli elementi per avere la dimensione per l'array
+    while((dir = readdir(d)) != NULL) {
+        if ( !strcmp(dir->d_name, ".") || !strcmp(dir->d_name, "..") ){
+            continue;
+        } else {
+            n++;
         }
-        printf("Lavoro sul file: %s",pathRelativo);
     }
+    rewinddir(d); // dato che abbiamo sceso tutto l'albero, si torna alla radice
 
+    char *filesList[n];
 
+    //metto i file nel mio array
+    while((dir = readdir(d)) != NULL) {
+        if ( !strcmp(dir->d_name, ".") || !strcmp(dir->d_name, "..") ){
+            continue;
+        }
+        else {
+            filesList[i] = (char*) malloc (strlen(dir->d_name)+1);
+            strncpy (filesList[i],dir->d_name, strlen(dir->d_name) );
+            i++;
+        }
+    }
+    closedir(d);
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-    //fine test directory
-    //inserisco in modo concorrente i task in coda
-    //vorrei inserire i task con la inserTail ma in mutua eslusione come faccio
-
+    //stampo i file
+    for(int k=0; k<=n-1; k++)
+        printf("%s\n", filesList[k]);
 
     //creo threadWorkers
-
     int j=0;
     for(j=0;j<numberThreads;j++)
     {
-        if(err = pthread_create(&tid,NULL,startWorker, (void*)(intptr_t)i ))
+        if(err = pthread_create(&tid,NULL,startWorker, (void*)(intptr_t)j ))
         {
             perror("errore creazione threadWorkers");
             exit(EXIT_FAILURE);

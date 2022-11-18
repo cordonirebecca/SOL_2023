@@ -6,10 +6,10 @@ CFLAGS	= -lm -Wall -pedantic -g
 
 objects = masterWorker.o
 
-masterWorker: masterWorker.o  
+masterWorker: masterWorker.o
 	$(CC) -pthread -o $@ $^
 
-masterWorker.o: masterWorker.c 
+masterWorker.o: masterWorker.c
 	$(CC) $(CFLAGS) -c $< 
 	
 list.o: list.c list.h

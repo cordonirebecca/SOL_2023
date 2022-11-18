@@ -1,6 +1,6 @@
 #!/bin/bash
 
-./masterWorker -n 6 - q 8 -d pippo -t 1000 &
+./masterWorker -q 7 -d pluto/pippo -t 2000 &
 #valgrind  --leak-check=full --track-origins=yes -s ./server config.txt &
 PID_SERVER=$!
 sleep 1

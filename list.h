@@ -27,37 +27,14 @@ extern void delete(NodeList**l, int el);
 
 
 */
-extern struct struttura_coda
-{
-    char * opzione;
-    struct struttura_coda * prec;
-    struct struttura_coda * next;
-} struttura_coda;
 
+extern struct tail_of_files{            // è la coda dove inserisco i files
+    char* file;
+    struct tail_of_files*prec;
+    struct tail_of_files*next;
+}tail_of_files;
 
-extern struct codaInteri
-{
-    int fileDescriptor;
-    struct codaInteri * prec;
-    struct codaInteri * next;
-} codaInteri;
-
-extern int is_empty_list(struct struttura_coda* head);
-extern int enqueue(struct struttura_coda* head, char * opzione);
-extern char * dequeue(struct struttura_coda* head);
-extern char * rimuovi(struct struttura_coda* head, char * opzione);
-extern void StampaLista(struct struttura_coda *head);
-extern int size(struct struttura_coda *head);
-
-
-extern int is_empty_list_Interi(struct codaInteri* head);
-extern int is_valid_list_Interi(struct codaInteri* head);
-extern int enqueue_Interi(struct codaInteri* head, int fileDescriptor);
-extern int dequeue_Interi(struct codaInteri* head, int *errore);
-extern int rimuovi_Interi(struct codaInteri* head, int idCliente);
-extern void StampaLista_Interi(struct codaInteri* head);
-extern int size_Interi(struct codaInteri* head);
-
-
+void StampaLista(struct tail_of_files* head);
+void insert(struct tail_of_files** head, char* file);
 
 #endif //SOL_LIST_H

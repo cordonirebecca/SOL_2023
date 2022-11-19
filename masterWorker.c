@@ -33,7 +33,7 @@ int numberThreads=4;
 int lenghtTail =8;
 const char* directoryName;
 char path_assoluto [UNIX_PATH_MAX+1];
-char buf[PATH_MAX];
+char buf[PATH_MAX+1];
 char *res;
 int tempo=0;
 
@@ -69,7 +69,7 @@ void signalMask(){
     printf("arrivato segnale:%d\n",indiceSegnale);
 }
 
-void getPathAssoluto(char* directoryName){
+char* getPathAssoluto(char* directoryName){
     char*res=realpath(directoryName, buf); // buf ha il path assoluto
     if(res == NULL ){
         if(errno == EACCES){
@@ -90,6 +90,7 @@ void getPathAssoluto(char* directoryName){
             perror(" A component of the path prefix is not a directory.");
         }
     }
+    return buf;
 }
 
 int parser(int argc, char*argv[]){
@@ -137,7 +138,201 @@ int parser(int argc, char*argv[]){
 void* startWorker(void* tizio){
     int indiceWorker=(intptr_t) tizio;
 }
+////Funzione per leggere la directory e le sottodirectory
 
+int isCurrentDirOrParentDir(char *nomeDirectory)
+{
+    if (strcmp(nomeDirectory, ".") == 0)
+    {
+        return 1;
+    }
+    else if(strcmp(nomeDirectory, "..") == 0)
+    {
+        return 2;
+    }
+    else
+    {
+        return 0;
+    }
+}
+
+
+/*Funzione che legge N file da una directory*/
+/*nel caso in cui siano presenti sottoDirectory, le visita ricorsivamente fino al raggiungimento di N*/
+int leggiNFileDaDirectory(int *numFile2,const char *dirName, char** arrayPath, int posizioneArray, short bitConteggio, int *numeroFileLetti)
+{
+    int chDirReturnValue=0;
+    int leggiTuttiIFile=0;
+    char *filename;
+    int closeDirReturnValue=0;
+    struct stat s;
+    int isFileCurrentDir = 0;
+    int chiamataRicorsivaReturnValue=0;
+    int isDirectory = 0;
+    int isFileRegolare = 0;
+    int chdirReturnValue=0;
+    int lunghezza=0;
+    char *path =NULL;
+    struct dirent *file = NULL;
+
+    if(numFile2 == NULL)
+    {
+            perror("ERRORE è stato passato alla funzione un valore non valido");
+
+        return -1;
+    }
+
+
+    leggiTuttiIFile = *numFile2 <= 0;
+    printf("dirName in funzione: %s\n",dirName);
+    DIR *dir = opendir(dirName);
+    if(errno==EACCES)
+    {
+        printf("ERRNO=EACCES");
+    }
+    if(errno==EBADF)
+    {
+        printf("ERRNO=EBADF");
+    }
+    if(errno==EMFILE)
+    {
+        printf("ERRNO=EMFILE");
+    }
+    if(errno==ENFILE)
+    {
+        printf("ERRNO=ENFILE");
+    }
+    if(errno==ENOENT)
+    {
+        printf("ERRNO=ENOENT");
+    }
+    if(errno==ENOMEM)
+    {
+        printf("ERRNO=ENOMEM");
+    }
+    if(errno==ENOTDIR)
+    {
+        printf("ERRNO=ENOTDIR");
+    }
+    if(dir==NULL)
+    {
+            perror("ERRORE nella funzione opendir\n");
+        return -1;
+    }
+    /* Eseguo operazione cd nella directory selezionata*/
+    chDirReturnValue=chdir(dirName);
+    if(chDirReturnValue==-1 && errno!=0)
+    {
+        {
+            perror("ERRORE nella funzione chdir\n");
+        }
+        return -1;
+    }
+
+    /*Leggo ogni entry presente nella directory fino a che non ho letto tutti i file oppure ho raggiunto il limite*/
+    while ((leggiTuttiIFile || *numFile2) && (file = readdir(dir)) != NULL)
+    {
+        filename = file->d_name;
+
+        stat(filename, &s);
+
+        isFileCurrentDir = isCurrentDirOrParentDir(filename);
+
+        isDirectory = S_ISDIR(s.st_mode);
+        isFileRegolare = S_ISREG(s.st_mode);
+
+        /*Tramite questi tre if, se ho selezionato un file*/
+        /*speciale lo salto, non considerandolo nel conteggio*/
+        if (isFileCurrentDir == 1 || isFileCurrentDir == 2)
+        {
+            continue;
+        }
+        else if (!isDirectory && !isFileRegolare)
+        {
+            /*se entro dentro questo if significato che*/
+            /*grazie all' utilizzo della struttura stat,*/
+            /*sono riuscito ad identificare che il file considerato in questo momento non*/
+            /*risulta un file regolare e nemmeno una directory*/
+            continue;
+        }
+        else if (isDirectory)
+        {
+            printf("Ho preso una directory\n");
+            chiamataRicorsivaReturnValue = leggiNFileDaDirectory( numFile2,filename, arrayPath,posizioneArray,bitConteggio, numeroFileLetti);
+            if (chiamataRicorsivaReturnValue == -1)
+            {
+                closeDirReturnValue=closedir(dir);
+                if(closeDirReturnValue==-1 && errno!=0)
+                {
+                    {
+                        perror("ERRORE nella funzione closedir\n");
+                        return -1;
+                    }
+                }
+                printf("chiusa directory\n\n\n\n\n");
+            }
+            else
+            {
+
+printf("devo salire\n");
+                chdirReturnValue=chdir("..");
+                if(chdirReturnValue==-1 && errno!=0)
+                {
+                    {
+                        perror("ERRORE nella funzione closedir\n");
+                    }
+                }
+                printf("sono salito\n");
+            }
+        }
+        else if (isFileRegolare)
+        {
+printf("ho preso un file\n");
+            if(bitConteggio == 0)
+            {
+                (*numeroFileLetti)++;
+            }
+            else
+            {
+                lunghezza=strlen(getPathAssoluto(filename))+1;
+                path=malloc(sizeof(char)*lunghezza);
+                path=getPathAssoluto(filename);
+                printf("Adesso lavoro nel path%s\n",path);
+                if(path==NULL)
+                {
+                    errno=EINVAL;
+                    return -1;
+                }
+
+                if(strcmp(arrayPath[posizioneArray],"")!=0)
+                {
+                    posizioneArray++;
+                }
+                strcpy(arrayPath[posizioneArray],path);
+            }
+            if (!leggiTuttiIFile)
+            {
+                (*numFile2)--;
+            }
+
+printf("lascio il file\n");
+        }
+    }
+
+
+    closedir(dir);
+    printf("chiusa dir\n");
+
+    return 0;
+}
+
+
+
+
+
+
+
+////////
 int main(int argc, char* argv []){
     int pid;
     int status;
@@ -196,8 +391,109 @@ int main(int argc, char* argv []){
     //gestione parser
     parser(argc, argv);
 
+    /////////leggere file in directory
+    char ** arrayPath ;
+int numFile2=0;
+int numFileLetti=0;
+char * dirName="pluto";
+char * directoryPartenza;
+
+    directoryPartenza=malloc(sizeof(char)*800);
+    directoryPartenza=getcwd(directoryPartenza,800);
+    printf("CLIENT: lavoro nella directory:%s\n",directoryPartenza);
+
+    /*Conto quanti file sono effettivamente presenti all' interno della direcotry richiesta*/
+    int bitConteggio=0;
+
+    //printf("prima volta--->\n numFile2:%d\ndirname:%s\ni:%d\nbitconteggio:%d\nnumfileletti:%d",numFile2,dirName,i,bitConteggio,numFileLetti);
+    int letturaDirectoryReturnValue=leggiNFileDaDirectory(&numFile2,dirName,arrayPath,i,bitConteggio,&numFileLetti);
+printf("letti %d file\n",numFileLetti);
+
+    if(letturaDirectoryReturnValue != 0)
+    {
+        perror("Errore nella lettura dei file dalla directory\n");
+    }
+
+    if(numFile2<=0 || numFile2>numFileLetti)
+    {
+        numFile2=numFileLetti;
+
+    }
+    bitConteggio=1;
+
+
+    arrayPath = malloc(numFile2 * sizeof(char *));
+    for(i=0; i<numFile2; i++)
+    {
+        arrayPath[i] = malloc(200 * sizeof(char));
+        strncpy(arrayPath[i],"",2);
+    }
+
+    i=0;
+
+    int salvaNumFile=numFile2;
+
+    /*Dopo essermi memorizzato la directory corrente da cui partivo, utilizzo la funzione chdir per ritornarci.
+    Questo risulta essere necessario perchè al procedura leggiNFileDaDirectory mi ha modificato al directory in cui sto lavorando.*/
+
+   int chdirReturnValue=chdir(directoryPartenza);
+    if(chdirReturnValue != 0)
+    {
+        perror("Errore nell' utilizzo di chdir\n");
+        return -1;
+    }
+
+    //printf("seconda volta--->\n numFile2:%d\ndirname:%s\ni:%d\nbitconteggio:%d\nnumfileletti:%d",numFile2,dirName,i,bitConteggio,numFileLetti);
+    letturaDirectoryReturnValue=leggiNFileDaDirectory(&numFile2,dirName,arrayPath,i,bitConteggio,&numFileLetti);
+
+
+    chdirReturnValue=0;
+    chdirReturnValue=chdir(directoryPartenza);
+    if(chdirReturnValue != 0)
+    {
+        /*è stato settato errno*/
+        perror("Errore nell' utilizzo di chdir\n");
+        return -1;
+    }
+
+    if(letturaDirectoryReturnValue != 0)
+    {
+        perror("Errore nella lettura dei file dalla directory\n");
+    }
+    char * rest;
+    char * token;
+    char * pathRelativo;
+    printf("SE STAMPO QUESTO SONO FELICE ------\n------------");
+    printf("salvanumfile%d\n\n\n\n\n\n\n\n\n",salvaNumFile);
+
+    for(i = 0; i < salvaNumFile; i++)
+    {
+        rest = arrayPath[i];
+
+        while ((token = strtok_r(rest, "/", &rest))!=NULL)
+        {
+            pathRelativo=token;
+        }
+        printf("Lavoro sul file: %s",pathRelativo);
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+    ////////////////////////////////////////////
+
+
+
     // apro la directory corrente per contare i miei file
-    d = opendir(directoryName);
+  /*  d = opendir(directoryName);
 
     // settiamo errno per opendir
     if(errno == EACCES){
@@ -250,7 +546,7 @@ int main(int argc, char* argv []){
     //stampo i file
     for(int k=0; k<=n-1; k++)
         printf("%s\n", filesList[k]);
-
+*/
     //creo threadWorkers
     int j=0;
     for(j=0;j<numberThreads;j++)

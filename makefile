@@ -5,11 +5,24 @@ CFLAGS	= -lm -Wall -pedantic -g
 .PHONY: clean all
 
 objects = masterWorker.o
+objectsClient= auxiliaryMW.o workers.o collector.o
 
-masterWorker: masterWorker.o
+masterWorker: masterWorker.o auxiliaryMW.o workers.o
 	$(CC) -pthread -o $@ $^
+	
+collector: $(objectsClient)
+	$(CC) -o $@ $^
 
-masterWorker.o: masterWorker.c
+collector.o: collector.c collector.h
+	$(CC) $(CFLAGS) -c $<
+
+masterWorker.o: masterWorker.c auxiliaryMW.h workers.h
+	$(CC) $(CFLAGS) -c $< 
+	
+auxiliaryMW.o: auxiliaryMW.c auxiliaryMW.h
+	$(CC) $(CFLAGS) -c $< 
+	
+workers.o: workers.c workers.h
 	$(CC) $(CFLAGS) -c $< 
 	
 list.o: list.c list.h
@@ -17,10 +30,12 @@ list.o: list.c list.h
 	
 all:
 	make masterWorker
-
+	make collector
+	
 clean:
 	-rm *.o
 	-rm masterWorker
+	-rm collector
 	 
 test:	
 	make all

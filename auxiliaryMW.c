@@ -213,3 +213,4 @@ int leggiNFileDaDirectory(int *numFile2,const char *dirName, char** arrayPath, i
     return 0;
 }
 
+

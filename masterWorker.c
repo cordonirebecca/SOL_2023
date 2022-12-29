@@ -17,9 +17,11 @@
 #include <ctype.h>
 #include <limits.h>
 #include<dirent.h>
+#include <stdbool.h>
 #include "workers.h"
 #define UNIX_PATH_MAX 255
 #include <arpa/inet.h>
+
 
 #define ec_meno1(s,m) \
     if((s)==-1) {perror(m); exit(EXIT_FAILURE); \
@@ -35,6 +37,7 @@ const char* directoryName;
 char path_assoluto [UNIX_PATH_MAX+1];
 int tempo=0;
 
+
 //comandi del parser
 int parser(int argc, char*argv[]){
     int c;
@@ -43,40 +46,37 @@ int parser(int argc, char*argv[]){
     char*ptr;
     opterr=0;
     while((c = getopt(argc, argv, "n:q:d:t:")) != -1){
-       switch(c){
-           case 'n':
-               ec_null(c,"main");
-               numberThreads = atoi(optarg);
-               printf("numberThreads: %d\n", numberThreads);
-               break;
+        switch(c){
+            case 'n':
+                ec_null(c,"main");
+                numberThreads = atoi(optarg);
+                printf("numberThreads: %d\n", numberThreads);
+                break;
 
-           case 'q':
-               ec_null(c,"main");
-               lenghtTail = atoi(optarg);
-               printf("lenghtail: %d\n", lenghtTail);
-               break;
+            case 'q':
+                ec_null(c,"main");
+                lenghtTail = atoi(optarg);
+                printf("lenghtail: %d\n", lenghtTail);
+                break;
 
-           case 'd':
-               ec_null(c,"main");
-               directoryName= optarg;
-               getPathAssoluto(directoryName);
-               break;
+            case 'd':
+                ec_null(c,"main");
+                directoryName= optarg;
+                getPathAssoluto(directoryName);
+                break;
 
-           case 't':
-               ec_null(c,"main");
-               tempo= atoi(optarg);
-               break;
-       }
-   }
+            case 't':
+                ec_null(c,"main");
+                tempo= atoi(optarg);
+                break;
+        }
+    }
 }
+
 
 int main(int argc, char* argv []){
     int pid;
     int status;
-    struct tail_of_files* element = malloc(sizeof(struct tail_of_files));
-    element->file=NULL;
-    element->next = NULL;
-    element->prec = NULL;
     pthread_t tid;
     pthread_t maskProducer;
     int sum;
@@ -110,9 +110,9 @@ int main(int argc, char* argv []){
             break;
         }
         case 0:  { //figlio collector
-           // execvp(argv[0], argv);
-           perror("Errore: exec");//errore collector
-           //printf("sono il figlio con il pid : %d\n\n", getpid());
+            // execvp(argv[0], argv);
+            perror("Errore: exec");//errore collector
+            //printf("sono il figlio con il pid : %d\n\n", getpid());
             sleep(3);
             //printf("sono il figlio sto morendo");
             exit(EXIT_SUCCESS);
@@ -142,7 +142,7 @@ int main(int argc, char* argv []){
     printf("CLIENT: lavoro nella directory:%s\n",directoryPartenza);
 
     /*Conto quanti file sono effettivamente presenti all' interno della direcotry richiesta*/
-   int bitConteggio=0;
+    int bitConteggio=0;
 
     //printf("prima volta--->\n numFile2:%d\ndirname:%s\ni:%d\nbitconteggio:%d\nnumfileletti:%d",numFile2,dirName,i,bitConteggio,numFileLetti);
     int letturaDirectoryReturnValue=leggiNFileDaDirectory(&numFile2,dirName,arrayPath,i,bitConteggio,&numFileLetti);
@@ -169,7 +169,7 @@ int main(int argc, char* argv []){
     /*Dopo essermi memorizzato la directory corrente da cui partivo, utilizzo la funzione chdir per ritornarci.
     Questo risulta essere necessario perchè al procedura leggiNFileDaDirectory mi ha modificato al directory in cui sto lavorando.*/
 
-   int chdirReturnValue=chdir(directoryPartenza);
+    int chdirReturnValue=chdir(directoryPartenza);
     if(chdirReturnValue != 0){
         perror("Errore nell' utilizzo di chdir\n");
         return -1;
@@ -197,7 +197,17 @@ int main(int argc, char* argv []){
         printf("Lavoro sul file: %s\n",pathRelativo);
     }
 
+    // creo la coda
+    Queue_r *my_queue = qcreate();
+    // aggiungo un po' di elementi
+    enqueue(my_queue, pathRelativo);
+    // mostro i risultati
+    printf("la coda my_queue contiene: ");
+    StampaLista(my_queue);
 
+
+
+    
     //creo threadWorkers
     int j=0;
     for(j=0;j<numberThreads;j++)
@@ -210,64 +220,64 @@ int main(int argc, char* argv []){
     }
 
     //comunicazione con collector
-        server_addr.sun_family=AF_UNIX;
+    server_addr.sun_family=AF_UNIX;
 
-        // Clean buffers:
-        memset(server_message, '\0', sizeof(server_message));
-        memset(client_message, '\0', sizeof(client_message));
+    // Clean buffers:
+    memset(server_message, '\0', sizeof(server_message));
+    memset(client_message, '\0', sizeof(client_message));
 
-        // Create socket:
+    // Create socket:
 
-        socket_desc = socket(AF_UNIX, SOCK_STREAM, 0);
+    socket_desc = socket(AF_UNIX, SOCK_STREAM, 0);
 
-        if(socket_desc == -1 && errno == EINTR){
-            printf("Error while creating socket\n");
-            return -1;
-        }
-        printf("Socket created successfully\n");
+    if(socket_desc == -1 && errno == EINTR){
+        printf("Error while creating socket\n");
+        return -1;
+    }
+    printf("Socket created successfully\n");
 
-        // Bind to the set port and IP:
-        if(bind(socket_desc, (struct sockaddr*)&server_addr, sizeof(server_addr))== -1 && errno==EINTR){
-            printf("Couldn't bind to the port\n");
-            return -1;
-        }
-        printf("Done with binding\n");
+    // Bind to the set port and IP:
+    if(bind(socket_desc, (struct sockaddr*)&server_addr, sizeof(server_addr))== -1 && errno==EINTR){
+        printf("Couldn't bind to the port\n");
+        return -1;
+    }
+    printf("Done with binding\n");
 
-        // Listen for clients:
-        if(listen(socket_desc, SOMAXCONN)== -1 && errno == EINTR ){
-            printf("Error while listening\n");
-            return -1;
-        }
-        printf("\nListening for incoming connections.....\n");
+    // Listen for clients:
+    if(listen(socket_desc, SOMAXCONN)== -1 && errno == EINTR ){
+        printf("Error while listening\n");
+        return -1;
+    }
+    printf("\nListening for incoming connections.....\n");
 
-        // Accept an incoming connection:
-        client_size = sizeof(client_addr);
-        client_sock = accept(socket_desc, (struct sockaddr*)&client_addr, &client_size);
+    // Accept an incoming connection:
+    client_size = sizeof(client_addr);
+    client_sock = accept(socket_desc, (struct sockaddr*)&client_addr, &client_size);
 
-        if (client_sock < 0){
-            printf("Can't accept\n");
-            return -1;
-        }
-        //printf("Client connected at IP: %s and port: %i\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+    if (client_sock < 0){
+        printf("Can't accept\n");
+        return -1;
+    }
+    //printf("Client connected at IP: %s and port: %i\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
 
-        // Receive client's message:
-        if (recv(client_sock, client_message, sizeof(client_message), 0) < 0){
-            printf("Couldn't receive\n");
-            return -1;
-        }
-        printf("Msg from client: %s\n", client_message);
+    // Receive client's message:
+    if (recv(client_sock, client_message, sizeof(client_message), 0) < 0){
+        printf("Couldn't receive\n");
+        return -1;
+    }
+    printf("Msg from client: %s\n", client_message);
 
-        // Respond to client:
-        strcpy(server_message, "This is the server's message.");
+    // Respond to client:
+    strcpy(server_message, "This is the server's message.");
 
-        if (send(client_sock, server_message, strlen(server_message), 0) < 0){
-            printf("Can't send\n");
-            return -1;
-        }
+    if (send(client_sock, server_message, strlen(server_message), 0) < 0){
+        printf("Can't send\n");
+        return -1;
+    }
 
-        // Closing the socket:
-        close(client_sock);
-        close(socket_desc);
+    // Closing the socket:
+    close(client_sock);
+    close(socket_desc);
 
 
     return 0;

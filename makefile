@@ -5,18 +5,18 @@ CFLAGS	= -lm -Wall -pedantic -g
 .PHONY: clean all
 
 objects = masterWorker.o
-objectsClient= auxiliaryMW.o workers.o collector.o
+objectsCollector= auxiliaryMW.o workers.o collector.o list.o
 
-masterWorker: masterWorker.o auxiliaryMW.o workers.o
+masterWorker: masterWorker.o auxiliaryMW.o workers.o list.o
 	$(CC) -pthread -o $@ $^
 	
-collector: $(objectsClient)
+collector: $(objectsCollector)
 	$(CC) -o $@ $^
 
 collector.o: collector.c collector.h
 	$(CC) $(CFLAGS) -c $<
 
-masterWorker.o: masterWorker.c auxiliaryMW.h workers.h
+masterWorker.o: masterWorker.c auxiliaryMW.h workers.h list.h
 	$(CC) $(CFLAGS) -c $< 
 	
 auxiliaryMW.o: auxiliaryMW.c auxiliaryMW.h

@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <assert.h>
 #include <signal.h>
 #include <dirent.h>
 #include <pthread.h>
@@ -12,7 +13,6 @@
 #include <sys/socket.h>
 #include <errno.h>
 #include <sys/stat.h>
-#include "list.h"
 #include "auxiliaryMW.h"
 #include <ctype.h>
 #include <limits.h>
@@ -21,6 +21,9 @@
 #include "workers.h"
 #define UNIX_PATH_MAX 255
 #include <arpa/inet.h>
+#include<semaphore.h>
+#define SHARED 1
+#include "list.h"
 
 
 #define ec_meno1(s,m) \
@@ -31,11 +34,32 @@
     if((s)==NULL) {perror(m); exit(EXIT_FAILURE); \
     }
 
+
+
 int numberThreads=4;
 int lenghtTail =8;
 const char* directoryName;
 char path_assoluto [UNIX_PATH_MAX+1];
 int tempo=0;
+pthread_t maskProducer;
+pthread_t thread_workers;
+pthread_t Creatore_thread_workers;
+
+sem_t empty, full,sm;
+int data;
+
+int socket_desc, client_sock, client_size;
+struct sockaddr_un server_addr, client_addr;
+char server_message[2000], client_message[2000];
+
+//mutex e cond variable
+pthread_mutex_t mtx=PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t cond=PTHREAD_COND_INITIALIZER;
+
+extern struct ListEl *head;
+
+void *job_of_masterWorker();
+void *job_of_worker();
 
 
 //comandi del parser
@@ -73,12 +97,15 @@ int parser(int argc, char*argv[]){
     }
 }
 
+struct file_name* estrai(){
+
+}
 
 int main(int argc, char* argv []){
     int pid;
     int status;
     pthread_t tid;
-    pthread_t maskProducer;
+    pthread_t ptid;
     int sum;
     int tot_files;
     int err;
@@ -91,10 +118,6 @@ int main(int argc, char* argv []){
     char * rest;
     char * token;
     char * pathRelativo;
-
-    int socket_desc, client_sock, client_size;
-    struct sockaddr_un server_addr, client_addr;
-    char server_message[2000], client_message[2000];
 
     //creo thread che si occupa della maschera segnali
     if(	pthread_create(&maskProducer, NULL, signalMask, NULL)!=0){
@@ -135,6 +158,7 @@ int main(int argc, char* argv []){
     //gestione parser
     parser(argc, argv);
 
+
     //leggo i file da tutte le directory
 
     directoryPartenza=malloc(sizeof(char)*800);
@@ -144,9 +168,8 @@ int main(int argc, char* argv []){
     /*Conto quanti file sono effettivamente presenti all' interno della direcotry richiesta*/
     int bitConteggio=0;
 
-    //printf("prima volta--->\n numFile2:%d\ndirname:%s\ni:%d\nbitconteggio:%d\nnumfileletti:%d",numFile2,dirName,i,bitConteggio,numFileLetti);
     int letturaDirectoryReturnValue=leggiNFileDaDirectory(&numFile2,dirName,arrayPath,i,bitConteggio,&numFileLetti);
-    printf("letti %d file\n",numFileLetti);
+    printf("file letti %d file\n\n",numFileLetti);
 
     if(letturaDirectoryReturnValue != 0){
         perror("Errore nella lettura dei file dalla directory\n");
@@ -189,38 +212,44 @@ int main(int argc, char* argv []){
         perror("Errore nella lettura dei file dalla directory\n");
     }
 
-    for(i = 0; i < salvaNumFile; i++){
-        rest = arrayPath[i];
-        while ((token = strtok_r(rest, "/", &rest))!=NULL){
-            pathRelativo=token;
-        }
-        printf("Lavoro sul file: %s\n",pathRelativo);
-    }
 
-    // creo la coda
-    Queue_r *my_queue = qcreate();
-    // aggiungo un po' di elementi
-    enqueue(my_queue, pathRelativo);
-    // mostro i risultati
-    printf("la coda my_queue contiene: ");
-    StampaLista(my_queue);
+    //stampa la lista concorrente
+    print_listEl(head);
 
 
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-    
-    //creo threadWorkers
-    int j=0;
-    for(j=0;j<numberThreads;j++)
-    {
-        if(err = pthread_create(&tid,NULL,startWorker, (void*)(intptr_t)j ))
-        {
-            perror("errore creazione threadWorkers");
+    //inizio a creare i thread
+    sem_init(&empty, SHARED, 1);
+    sem_init(&full, SHARED, 0);
+    sem_init(&sm,SHARED,1);
+
+    //creo producer
+    pthread_create(&ptid,NULL,job_of_masterWorker,NULL);
+
+    //creo i vari workers
+    for(i=0;i<numberThreads; i++){
+        if((pthread_create(&thread_workers, NULL, job_of_worker, (void*)(intptr_t)i))!=0){
+            perror("SERVER-> Errore nella funzione pthread_create\n");
             exit(EXIT_FAILURE);
         }
     }
 
+    sleep(3);
+
+    //eseguo le join
+    pthread_join(ptid,NULL);
+    for(int j=0;j<numberThreads;j++){
+        pthread_join(thread_workers,NULL);
+
+    }
+
+    printf("fine main\n");
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
     //comunicazione con collector
-    server_addr.sun_family=AF_UNIX;
+   server_addr.sun_family=AF_UNIX;
 
     // Clean buffers:
     memset(server_message, '\0', sizeof(server_message));
@@ -279,6 +308,46 @@ int main(int argc, char* argv []){
     close(client_sock);
     close(socket_desc);
 
-
     return 0;
+}
+
+
+void *job_of_masterWorker(void* arg){
+    int produced;
+    printf("Producer created\n");
+   // printf("\nProducer id is %ld\n",pthread_self());
+  /*  struct file_node* p;
+    for(int i=0; i<10; i++){
+        //prendere da array già fatto e inserire nel nuovo
+        pthread_mutex_lock(&mtx);
+        //inserisci(p);
+        pthread_cond_signal(&cond);
+        pthread_mutex_unlock(&mtx);
+    }
+    return(void*)0;*/
+}
+
+
+void *job_of_worker(void *arg){
+   int consumed, total=0;
+   struct file_node* p;
+    int *thread = (int*)arg;
+
+   // printf("job_of_worker created, Thread number: %d\n", thread);
+   printf("worker: %d\n",thread);
+    /*    while(true){
+           pthread_mutex_lock(&mtx);
+           while(head == NULL){
+               pthread_cond_wait(&cond, &mtx);
+               printf("svegliati amico thread\n");
+               fflush(stdout);
+           }
+           //il consumatore prende quel nodo
+           p=estrai();
+           // elimina quel nodo
+           //delete();
+           pthread_mutex_unlock(&mtx);
+           // elaborazione di p il file estratto, la somma dei numeri binari
+           return(void*)0;
+       }*/
 }

@@ -16,7 +16,6 @@
 #include <sys/socket.h>
 #include <errno.h>
 #include <sys/stat.h>
-#include "list.h"
 #include "auxiliaryMW.h"
 #include <ctype.h>
 #include <limits.h>

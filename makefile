@@ -19,14 +19,14 @@ collector.o: collector.c collector.h
 masterWorker.o: masterWorker.c auxiliaryMW.h workers.h list.h
 	$(CC) $(CFLAGS) -c $< 
 	
-auxiliaryMW.o: auxiliaryMW.c auxiliaryMW.h
+list.o: list.c list.h
+	$(CC) $(CFLAGS) -c $<
+	
+auxiliaryMW.o: auxiliaryMW.c auxiliaryMW.h list.h
 	$(CC) $(CFLAGS) -c $< 
 	
 workers.o: workers.c workers.h
 	$(CC) $(CFLAGS) -c $< 
-	
-list.o: list.c list.h
-	$(CC) $(CFLAGS) -c $<
 	
 all:
 	make masterWorker

@@ -14,11 +14,11 @@
 #include <sys/socket.h>
 #include <errno.h>
 #include <sys/stat.h>
-#include "list.h"
 #include "auxiliaryMW.h"
 #include <ctype.h>
 #include <limits.h>
 #include<dirent.h>
+#include "list.h"
 
 #define UNIX_PATH_MAX 255
 
@@ -32,6 +32,8 @@
 
 char buf[PATH_MAX+1];
 char *res;
+struct ListEl *head;
+
 
 void signalMask(){
     struct sigaction sa;
@@ -90,6 +92,7 @@ char* getPathAssoluto(char* directoryName){
     return buf;
 }
 
+
 /*Funzione che legge N file da una directory*/
 /*nel caso in cui siano presenti sottoDirectory, le visita ricorsivamente fino al raggiungimento di N*/
 int leggiNFileDaDirectory(int *numFile2,const char *dirName, char** arrayPath, int posizioneArray, short bitConteggio, int *numeroFileLetti){
@@ -106,6 +109,9 @@ int leggiNFileDaDirectory(int *numFile2,const char *dirName, char** arrayPath, i
     char *path =NULL;
     struct dirent *dir = NULL;
     DIR *d;
+
+    char* name;
+    struct ListEl *head;
 
     if(numFile2 == NULL){
         perror("ERRORE è stato passato alla funzione un valore non valido");
@@ -194,7 +200,18 @@ int leggiNFileDaDirectory(int *numFile2,const char *dirName, char** arrayPath, i
                 lunghezza=strlen(getPathAssoluto(filename))+1;
                 path=malloc(sizeof(char)*lunghezza);
                 path=getPathAssoluto(filename);
-                printf("Adesso lavoro nel path%s\n",path);
+                printf("\nfile in azione: %s\n",filename);
+
+
+                //creo una lista con tutti i file che mi stampo nel masterWorker
+                //path assoluto per recuperare i file
+                name=path;
+                struct ListEl *head = malloc(sizeof(struct ListEl));
+                strcpy(head->name, name);
+                head->next = NULL;
+                add_bottom_listEl(head, name);
+
+
                 if(path==NULL){
                     errno=EINVAL;
                     return -1;
@@ -202,13 +219,15 @@ int leggiNFileDaDirectory(int *numFile2,const char *dirName, char** arrayPath, i
                 if(strcmp(arrayPath[posizioneArray],"")!=0){
                     posizioneArray++;
                 }
-                strcpy(arrayPath[posizioneArray],path);
+                strcpy(arrayPath[posizioneArray],path); // in path ho copiato tutto il percorso file
+                printf("Adesso lavoro nel path%s\n",path);
             }
             if (!leggiTuttiIFile){
                 (*numFile2)--;
             }
         }
     }
+
     closedir(d);
     return 0;
 }

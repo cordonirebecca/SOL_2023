@@ -24,6 +24,10 @@
 #include<semaphore.h>
 #define SHARED 1
 #include "list.h"
+#include <dirent.h>
+
+
+#define MAXPATHLEN 100
 
 
 #define ec_meno1(s,m) \
@@ -33,8 +37,6 @@
 #define ec_null(s,m) \
     if((s)==NULL) {perror(m); exit(EXIT_FAILURE); \
     }
-
-
 
 int numberThreads=4;
 int lenghtTail =8;
@@ -51,26 +53,13 @@ int data;
 int socket_desc, client_sock, client_size;
 struct sockaddr_un server_addr, client_addr;
 char server_message[2000], client_message[2000];
-
-int sum;
-int tot_files;
-int err;
 int i=0;
-char ** arrayPath ;
-int numFile2=0;
-int numFileLetti=0;
-char * dirName="pluto";
-char * directoryPartenza;
-char * rest;
-char * token;
-char * pathRelativo;
-
 
 //mutex e cond variable
 pthread_mutex_t mtx=PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t cond=PTHREAD_COND_INITIALIZER;
 
-extern struct ListEl *head;
+extern struct listEl *queue;
 
 void *job_of_masterWorker();
 void *job_of_worker();
@@ -170,6 +159,7 @@ int main(int argc, char* argv []){
     //creo producer
     pthread_create(&ptid,NULL,job_of_masterWorker,NULL);
 
+
     //creo i vari workers
     for(i=0;i<numberThreads; i++){
         if((pthread_create(&thread_workers, NULL, job_of_worker, (void*)(intptr_t)i))!=0){
@@ -177,8 +167,6 @@ int main(int argc, char* argv []){
             exit(EXIT_FAILURE);
         }
     }
-
-    sleep(3);
 
     //eseguo le join
     pthread_join(ptid,NULL);
@@ -222,6 +210,7 @@ int main(int argc, char* argv []){
     }
     printf("\nListening for incoming connections.....\n");
 
+
     // Accept an incoming connection:
     client_size = sizeof(client_addr);
     client_sock = accept(socket_desc, (struct sockaddr*)&client_addr, &client_size);
@@ -254,73 +243,39 @@ int main(int argc, char* argv []){
     return 0;
 }
 
+void listdir(const char *name, int indent)
+{
+    DIR *dir;
+    struct dirent *entry;
+
+    if (!(dir = opendir(name)))
+        return;
+
+    while ((entry = readdir(dir)) != NULL) {
+        if (entry->d_type == DT_DIR) {
+            char path[1024];
+            if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+                continue;
+            snprintf(path, sizeof(path), "%s/%s", name, entry->d_name);
+            printf("%*s[%s]\n", indent, "", entry->d_name);
+            listdir(path, indent + 2);
+        } else {
+            printf("%*s- %s\n", indent, "", entry->d_name);
+        }
+    }
+    closedir(dir);
+}
+
 
 void *job_of_masterWorker(void* arg){
     int produced;
     printf("Producer created\n");
+    listdir("pluto",1);
 
     pthread_mutex_lock(&mtx);
-
-    //leggo i file da tutte le directory
-
-    directoryPartenza=malloc(sizeof(char)*800);
-    directoryPartenza=getcwd(directoryPartenza,800);
-    printf("CLIENT: lavoro nella directory:%s\n",directoryPartenza);
-
-    /*Conto quanti file sono effettivamente presenti all' interno della direcotry richiesta*/
-    int bitConteggio=0;
-
-    int letturaDirectoryReturnValue=leggiNFileDaDirectory(&numFile2,dirName,arrayPath,i,bitConteggio,&numFileLetti);
-    printf("file letti %d file\n\n",numFileLetti);
-
-    if(letturaDirectoryReturnValue != 0){
-        perror("Errore nella lettura dei file dalla directory\n");
-    }
-
-    if(numFile2<=0 || numFile2>numFileLetti){
-        numFile2=numFileLetti;
-
-    }
-    bitConteggio=1;
-
-    arrayPath = malloc(numFile2 * sizeof(char *));
-    for(i=0; i<numFile2; i++){
-        arrayPath[i] = malloc(200 * sizeof(char));
-        strncpy(arrayPath[i],"",2);
-    }
-
-    i=0;
-    int salvaNumFile=numFile2;
-    /*Dopo essermi memorizzato la directory corrente da cui partivo, utilizzo la funzione chdir per ritornarci.
-    Questo risulta essere necessario perchè al procedura leggiNFileDaDirectory mi ha modificato al directory in cui sto lavorando.*/
-
-    int chdirReturnValue=chdir(directoryPartenza);
-    if(chdirReturnValue != 0){
-        perror("Errore nell' utilizzo di chdir\n");
-        return -1;
-    }
-
-    letturaDirectoryReturnValue=leggiNFileDaDirectory(&numFile2,dirName,arrayPath,i,bitConteggio,&numFileLetti);
-
-    chdirReturnValue=0;
-    chdirReturnValue=chdir(directoryPartenza);
-    if(chdirReturnValue != 0){
-        /*è stato settato errno*/
-        perror("Errore nell' utilizzo di chdir\n");
-        return -1;
-    }
-
-    if(letturaDirectoryReturnValue != 0){
-        perror("Errore nella lettura dei file dalla directory\n");
-    }
-
-
-    //stampa la lista concorrente
-    print_listEl(head);
-
-
     pthread_cond_signal(&cond);
-    pthread_mutex_unlock(&mtx);
+        pthread_mutex_unlock(&mtx);
+
 
       return(void*)0;
 }
@@ -331,21 +286,21 @@ void *job_of_worker(void *arg){
     struct file_node* p;
     int *thread = (int*)arg;
 
-    // printf("job_of_worker created, Thread number: %d\n", thread);
     printf("worker: %d\n",thread);
-    /*    while(true){
+   // printf("head: %s\n\n\n",head->name);
+    /*   while(true){
            pthread_mutex_lock(&mtx);
            while(head == NULL){
                pthread_cond_wait(&cond, &mtx);
                printf("svegliati amico thread\n");
                fflush(stdout);
-           }
+           }/*
            //il consumatore prende quel nodo
            p=estrai();
            // elimina quel nodo
-           //delete();
-           pthread_mutex_unlock(&mtx);
+           //delete();*/
+   //        pthread_mutex_unlock(&mtx);
            // elaborazione di p il file estratto, la somma dei numeri binari
            return(void*)0;
-       }*/
+     //  }
 }

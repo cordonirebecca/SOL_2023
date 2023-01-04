@@ -5,12 +5,17 @@
 #ifndef SOL_LIST_H
 #define SOL_LIST_H
 
+#include <pthread.h>
+
 typedef struct ListEl{
-    char name[1000];
+    const char *name;
     struct ListEl* next;
 }listEl;
 
-void add_bottom_listEl (struct ListEl *head, char *name);
+
+
+
+void add_bottom_listEl (char ch);
 
 void print_listEl(struct ListEl* head);
 

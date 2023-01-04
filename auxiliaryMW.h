@@ -9,6 +9,4 @@ extern void signalMask();
 
 char* getPathAssoluto(char* directoryName);
 
-int leggiNFileDaDirectory(int *numFile2,const char *dirName, char** arrayPath, int posizioneArray, short bitConteggio, int *numeroFileLetti);
-
 #endif //SOL_AUXILIARYMW_H

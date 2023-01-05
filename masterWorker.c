@@ -114,6 +114,7 @@ int main(int argc, char* argv []){
     int status;
     pthread_t tid;
     pthread_t ptid;
+    char* file_preso;
 
     //creo thread che si occupa della maschera segnali
     if(	pthread_create(&maskProducer, NULL, signalMask, NULL)!=0){
@@ -162,19 +163,19 @@ int main(int argc, char* argv []){
     sem_init(&sm,SHARED,1);
 
 
-    pthread_mutex_lock(&mtx);
     struct llist *head=malloc(sizeof (struct llist));
-
+    pthread_mutex_lock(&mtx);
     listdir("pluto",1,head);
-    StampaLista(head);//è la lista con tutti i file da aprire
-
+    //ora head ha tutti i file da aprire
+    StampaLista(head);
     pthread_cond_signal(&cond);
     pthread_mutex_unlock(&mtx);
 
-    sleep(2);
+    //  file_preso=dequeue(head);
+    //  printf("FILE PRESO E CANCELLATO: %s\n\n\n",file_preso);
 
     //creo il thread che si occupa di inserire i file nella lista
-   // pthread_create(&ptid,NULL,job_of_masterWorker,NULL);
+    // pthread_create(&ptid,NULL,job_of_masterWorker,NULL);
 
     //creo i vari workers
     for(i=0;i<numberThreads; i++){
@@ -281,7 +282,7 @@ void *job_of_worker(void *arg){
    // struct file_node* p;
     int *thread = (int*)arg;
 
-   //printf("head: %s\n\n",head->opzione);
+    //printf("head: %s\n\n",head->opzione);
     printf("worker: %d\n",thread);
     /*   while(true){
            pthread_mutex_lock(&mtx);
@@ -298,4 +299,5 @@ void *job_of_worker(void *arg){
            // elaborazione di p il file estratto, la somma dei numeri binari
  //          return(void*)0;
   //     }
+    pthread_exit(NULL);
 }

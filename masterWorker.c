@@ -70,6 +70,10 @@ struct sockaddr_un server_addr, client_addr;
 char server_message[2000], client_message[2000];
 int i=0;
 
+struct llist *head;
+//ho creato il file
+file_name *pr;
+
 //mutex e cond variable
 pthread_mutex_t mtx=PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t cond=PTHREAD_COND_INITIALIZER;
@@ -128,47 +132,7 @@ int is_valid_list(struct llista* head)
     return head != NULL;
 }
 
-void enqueue(struct llist* head, char * opzione){
-   /* if (!is_valid_list(head)){
-        printf("Errore, testa della lista uguale a null");
-        return 0;
-    }
-
-    if(is_empty_list(head))
-    {
-       head->opzione=(char*)malloc(80*sizeof(char));
-        strcpy(head->opzione,opzione);
-        head->prec = NULL;
-        head->next = NULL;
-        return 1;
-  /*  }
-    else
-    {*/
-
-        struct llist *new= malloc(sizeof(struct llist));
-    struct llist *nodoCorrente= malloc(sizeof(struct llist));
-        new->opzione=malloc(80* sizeof(char));
-        strcpy(new->opzione,opzione);
-        new->next=NULL;
-        if((head->opzione)==NULL) {
-            (head->opzione) = (new->opzione);
-        }else{
-            nodoCorrente=head;
-            while(nodoCorrente->next != NULL)
-            {
-                nodoCorrente=nodoCorrente->next;
-            }
-        }
-    printf("NODO CORRENTE : %s\n\n",nodoCorrente->opzione);
-    printf("SONO LA STRONZA DELLA HEAD NELLA FUNZIONE: %s\n\n",head->opzione);
-        nodoCorrente->next=new;
-
-    printf("sono sempre io la head zoccoletta\n\n\n");
-  //  }
-}
-
-void StampaLista(struct llist* head)
-{
+void StampaLista(struct llist* head){
     struct llist *temp = head;
     if (!is_valid_list(head)){
         // tirare errore se head = null
@@ -176,20 +140,34 @@ void StampaLista(struct llist* head)
         exit(1);
     }
 
-    if(is_empty_list(head))
-    {
+    if(is_empty_list(head)){
         printf("Lista vuota\n");
     }
-    else
-    {
+    else{
         printf("Lista:");
-        while (temp != NULL)
-        {
-            printf(" %s", temp->opzione);
+        while (temp != NULL){
+            printf(" %s -> ", temp->opzione);
             temp = temp->next;
         }
         printf("\n");
     }
+}
+
+void enqueue(struct llist* head, char * opzione){
+    struct llist *new= malloc(sizeof(struct llist));
+    struct llist *nodoCorrente= malloc(sizeof(struct llist));
+    new->opzione=malloc(80* sizeof(char));
+    strcpy(new->opzione,opzione);
+    new->next=NULL;
+    if((head->opzione)==NULL) {
+        (head->opzione) = (new->opzione);
+    }else{
+        nodoCorrente=head;
+        while(nodoCorrente->next != NULL){
+            nodoCorrente=nodoCorrente->next;
+        }
+    }
+    nodoCorrente->next=new;
 }
 
 
@@ -199,38 +177,14 @@ int main(int argc, char* argv []){
     pthread_t tid;
     pthread_t ptid;
 
-    struct llist *head=malloc(sizeof (struct llist));
+/*    struct llist *head=malloc(sizeof (struct llist));
 
     //ho creato il file
     file_name *pr = malloc(sizeof(file_name));
     pr->name= strdup("ciao");
-    printf("io sono pr_name:%s\n\n\n",pr->name);
-    printf("SONO LA STRONZA DELLA HEAD NEL MAIN: %s\n\n",head->opzione);
-
     enqueue(head,pr->name);
-
-   // StampaLista(head);
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    StampaLista(head);
+*/
 
     //creo thread che si occupa della maschera segnali
     if(	pthread_create(&maskProducer, NULL, signalMask, NULL)!=0){
@@ -367,7 +321,7 @@ int main(int argc, char* argv []){
 
 
 //funzione che apre tutte le cartelle e mi stampa i file in ognuna
-void listdir(const char *name, int indent){
+void listdir(const char *name, int indent,struct llist *l){
     DIR *dir;
     struct dirent *entry;
     if (!(dir = opendir(name)))
@@ -381,10 +335,11 @@ void listdir(const char *name, int indent){
             //path è il percorso directory senza i file
             snprintf(path, sizeof(path), "%s/%s", name, entry->d_name);
             printf("%*s[%s]\n", indent, "", entry->d_name);
-            listdir(path, indent + 2);
+            return listdir(path, indent + 2,l);
         } else {
             // sono uno o più file nella directory
             printf("%*s- %s\n", indent, "", entry->d_name);
+            enqueue(l,entry->d_name);
         }
     }
     closedir(dir);
@@ -393,13 +348,12 @@ void listdir(const char *name, int indent){
 
 
 void *job_of_masterWorker(void* arg){
-    //alloco l'array in cui inserisco i file
-
-
 
     pthread_mutex_lock(&mtx);
+    struct llist *head=malloc(sizeof (struct llist));
 
-    listdir("pluto",1);
+    listdir("pluto",1,head);
+    StampaLista(head);
 
 
     pthread_cond_signal(&cond);

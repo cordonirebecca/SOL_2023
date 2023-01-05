@@ -25,3 +25,6 @@
 void* startWorker(void* tizio){
     int indiceWorker=(intptr_t) tizio;
 }
+
+
+

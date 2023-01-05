@@ -39,18 +39,6 @@
     }
 
 
-typedef struct {
-    char *name;
-} file_name;
-
-typedef struct llist
-{
-    char* opzione;
-    struct llist *prec;
-    struct llist *next;
-} list;
-
-
 int numberThreads=4;
 int lenghtTail =8;
 const char* directoryName;
@@ -59,8 +47,6 @@ int tempo=0;
 pthread_t maskProducer;
 pthread_t thread_workers;
 pthread_t Creatore_thread_workers;
-
-int num_max_file=250;
 
 sem_t empty, full,sm;
 int data;
@@ -122,69 +108,12 @@ struct file_name* estrai(){
 
 }
 //////////////////////////////////////////////////////////////////////
-int is_empty_list(struct llist* head)
-{
-    return head->opzione == NULL;
-}
-
-int is_valid_list(struct llista* head)
-{
-    return head != NULL;
-}
-
-void StampaLista(struct llist* head){
-    struct llist *temp = head;
-    if (!is_valid_list(head)){
-        // tirare errore se head = null
-        printf("Errore Stampa Lista");
-        exit(1);
-    }
-
-    if(is_empty_list(head)){
-        printf("Lista vuota\n");
-    }
-    else{
-        printf("Lista:");
-        while (temp != NULL){
-            printf(" %s -> ", temp->opzione);
-            temp = temp->next;
-        }
-        printf("\n");
-    }
-}
-
-void enqueue(struct llist* head, char * opzione){
-    struct llist *new= malloc(sizeof(struct llist));
-    struct llist *nodoCorrente= malloc(sizeof(struct llist));
-    new->opzione=malloc(80* sizeof(char));
-    strcpy(new->opzione,opzione);
-    new->next=NULL;
-    if((head->opzione)==NULL) {
-        (head->opzione) = (new->opzione);
-    }else{
-        nodoCorrente=head;
-        while(nodoCorrente->next != NULL){
-            nodoCorrente=nodoCorrente->next;
-        }
-    }
-    nodoCorrente->next=new;
-}
-
 
 int main(int argc, char* argv []){
     int pid;
     int status;
     pthread_t tid;
     pthread_t ptid;
-
-/*    struct llist *head=malloc(sizeof (struct llist));
-
-    //ho creato il file
-    file_name *pr = malloc(sizeof(file_name));
-    pr->name= strdup("ciao");
-    enqueue(head,pr->name);
-    StampaLista(head);
-*/
 
     //creo thread che si occupa della maschera segnali
     if(	pthread_create(&maskProducer, NULL, signalMask, NULL)!=0){
@@ -232,9 +161,20 @@ int main(int argc, char* argv []){
     sem_init(&full, SHARED, 0);
     sem_init(&sm,SHARED,1);
 
-    //creo il thread che si occupa di inserire i file nella lista
-    pthread_create(&ptid,NULL,job_of_masterWorker,NULL);
 
+    pthread_mutex_lock(&mtx);
+    struct llist *head=malloc(sizeof (struct llist));
+
+    listdir("pluto",1,head);
+    StampaLista(head);//è la lista con tutti i file da aprire
+
+    pthread_cond_signal(&cond);
+    pthread_mutex_unlock(&mtx);
+
+    sleep(2);
+
+    //creo il thread che si occupa di inserire i file nella lista
+   // pthread_create(&ptid,NULL,job_of_masterWorker,NULL);
 
     //creo i vari workers
     for(i=0;i<numberThreads; i++){
@@ -244,12 +184,13 @@ int main(int argc, char* argv []){
         }
     }
 
+
     //eseguo le join
-    pthread_join(ptid,NULL);
+/*    pthread_join(ptid,NULL);
     for(int j=0;j<numberThreads;j++){
         pthread_join(thread_workers,NULL);
 
-    }
+    }*/
 
     printf("fine main\n");
 
@@ -263,7 +204,6 @@ int main(int argc, char* argv []){
     memset(client_message, '\0', sizeof(client_message));
 
     // Create socket:
-
     socket_desc = socket(AF_UNIX, SOCK_STREAM, 0);
 
     if(socket_desc == -1 && errno == EINTR){
@@ -320,41 +260,13 @@ int main(int argc, char* argv []){
 }
 
 
-//funzione che apre tutte le cartelle e mi stampa i file in ognuna
-void listdir(const char *name, int indent,struct llist *l){
-    DIR *dir;
-    struct dirent *entry;
-    if (!(dir = opendir(name)))
-        return;
-
-    while ((entry = readdir(dir)) != NULL) {
-        if (entry->d_type == DT_DIR) {
-            char path[1024];
-            if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
-                continue;
-            //path è il percorso directory senza i file
-            snprintf(path, sizeof(path), "%s/%s", name, entry->d_name);
-            printf("%*s[%s]\n", indent, "", entry->d_name);
-            return listdir(path, indent + 2,l);
-        } else {
-            // sono uno o più file nella directory
-            printf("%*s- %s\n", indent, "", entry->d_name);
-            enqueue(l,entry->d_name);
-        }
-    }
-    closedir(dir);
-}
-
-
-
 void *job_of_masterWorker(void* arg){
 
     pthread_mutex_lock(&mtx);
     struct llist *head=malloc(sizeof (struct llist));
 
     listdir("pluto",1,head);
-    StampaLista(head);
-
+    StampaLista(head);//è la lista con tutti i file da aprire
 
     pthread_cond_signal(&cond);
     pthread_mutex_unlock(&mtx);
@@ -366,24 +278,24 @@ void *job_of_masterWorker(void* arg){
 
 void *job_of_worker(void *arg){
     int consumed, total=0;
-    struct file_node* p;
+   // struct file_node* p;
     int *thread = (int*)arg;
 
+   //printf("head: %s\n\n",head->opzione);
     printf("worker: %d\n",thread);
-   // printf("head: %s\n\n\n",head->name);
     /*   while(true){
            pthread_mutex_lock(&mtx);
            while(head == NULL){
                pthread_cond_wait(&cond, &mtx);
                printf("svegliati amico thread\n");
                fflush(stdout);
-           }/*
+           }
            //il consumatore prende quel nodo
-           p=estrai();
+          // p=estrai();
            // elimina quel nodo
            //delete();*/
    //        pthread_mutex_unlock(&mtx);
            // elaborazione di p il file estratto, la somma dei numeri binari
-           return(void*)0;
-     //  }
+ //          return(void*)0;
+  //     }
 }

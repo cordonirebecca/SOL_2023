@@ -7,16 +7,28 @@
 
 #include <pthread.h>
 
-typedef struct ListEl{
-    const char *name;
-    struct ListEl* next;
-}listEl;
+typedef struct {
+    char *name;
+} file_name;
+
+typedef struct llist
+{
+    char* opzione;
+    struct llist *prec;
+    struct llist *next;
+    pthread_mutex_t head_lock;
+    pthread_mutex_t tail_lock;
+} list;
 
 
+int is_empty_list(struct llist* head);
 
+int is_valid_list(struct llist* head);
 
-void add_bottom_listEl (char ch);
+void StampaLista(struct llist* head);
 
-void print_listEl(struct ListEl* head);
+void enqueue(struct llist* head, char * opzione);
+
+void listdir(const char *name, int indent,struct llist *l);
 
 #endif //SOL_LIST_H

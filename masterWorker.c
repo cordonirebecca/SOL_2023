@@ -25,7 +25,8 @@
 #define SHARED 1
 #include "list.h"
 #include <dirent.h>
-
+#include <ctype.h>
+#include <semaphore.h>
 
 #define MAXPATHLEN 100
 
@@ -37,6 +38,21 @@
 #define ec_null(s,m) \
     if((s)==NULL) {perror(m); exit(EXIT_FAILURE); \
     }
+
+typedef int buffer_item;
+#define BUFFER_SIZE 5
+
+// Global variables
+buffer_item buffer[BUFFER_SIZE];
+pthread_mutex_t mutex;
+sem_t full, empty;
+int count, in, out;
+
+// Function prototypes
+int insert_item(buffer_item item);
+int remove_item(buffer_item *item);
+void *consumer(void *param);
+void *producer(void *param);
 
 
 int numberThreads=4;
@@ -56,18 +72,48 @@ struct sockaddr_un server_addr, client_addr;
 char server_message[2000], client_message[2000];
 int i=0;
 
-struct llist *head;
-//ho creato il file
-file_name *pr;
-
-//mutex e cond variable
-pthread_mutex_t mtx=PTHREAD_MUTEX_INITIALIZER;
-pthread_cond_t cond=PTHREAD_COND_INITIALIZER;
-
 
 void *job_of_masterWorker();
 void *job_of_worker();
 
+// funzione eseguita dal thread produttore
+void *Producer(void *arg) {
+    Queue_t *q  = ((threadArgs_t*)arg)->q;
+    int   myid  = ((threadArgs_t*)arg)->thid;
+    char *data = malloc(sizeof(char));
+    if (data == NULL) {
+        perror("Producer malloc");
+        pthread_exit(NULL);
+    }
+    data="ciao";
+    if (push(q, data) == -1) {
+        fprintf(stderr, "Errore: push\n");
+        pthread_exit(NULL);
+    }
+    StampaLista(q);
+    printf("Producer: %d exits\n", myid);
+    return NULL;
+}
+
+// funzione eseguita dal thread consumatore
+void *Consumer(void *arg) {
+    Queue_t *q = ((threadArgs_t *) arg)->q;
+    int myid = ((threadArgs_t *) arg)->thid;
+
+    size_t consumed = 0;
+    while (1) {
+        int *data;
+        data = dequeue(q);
+        assert(data);
+        if (*data == -1) {
+            free(data);
+            break;
+        }
+        ++consumed;
+        printf("Consumer:  %d, estratto: <%d>\n", myid, *data);
+        free(data);
+    }
+}
 
 //comandi del parser
 int parser(int argc, char*argv[]){
@@ -107,7 +153,6 @@ int parser(int argc, char*argv[]){
 struct file_name* estrai(){
 
 }
-//////////////////////////////////////////////////////////////////////
 
 int main(int argc, char* argv []){
     int pid;
@@ -157,44 +202,79 @@ int main(int argc, char* argv []){
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-    //inizio a creare i thread
-    sem_init(&empty, SHARED, 1);
-    sem_init(&full, SHARED, 0);
-    sem_init(&sm,SHARED,1);
+   //faccio il parsing degli argomenti
+    extern char *optarg;
+    int p=1,c=4, n=3;
 
+    printf("num producers =%d, num consumers =%d\n", p, c);
 
-    struct llist *head=malloc(sizeof (struct llist));
-    pthread_mutex_lock(&mtx);
-    listdir("pluto",1,head);
-    //ora head ha tutti i file da aprire
-    StampaLista(head);
-    pthread_cond_signal(&cond);
-    pthread_mutex_unlock(&mtx);
+    pthread_t    *th;
+    threadArgs_t *thARGS;
 
-    //  file_preso=dequeue(head);
-    //  printf("FILE PRESO E CANCELLATO: %s\n\n\n",file_preso);
-
-    //creo il thread che si occupa di inserire i file nella lista
-    // pthread_create(&ptid,NULL,job_of_masterWorker,NULL);
-
-    //creo i vari workers
-    for(i=0;i<numberThreads; i++){
-        if((pthread_create(&thread_workers, NULL, job_of_worker, (void*)(intptr_t)i))!=0){
-            perror("SERVER-> Errore nella funzione pthread_create\n");
-            exit(EXIT_FAILURE);
-        }
+    th     = malloc((p+c)*sizeof(pthread_t));
+    thARGS = malloc((p+c)*sizeof(threadArgs_t));
+    if (!th || !thARGS) {
+        fprintf(stderr, "malloc fallita\n");
+        exit(EXIT_FAILURE);
     }
 
+    Queue_t *q = initQueue();
+    if (!q) {
+        fprintf(stderr, "initQueue fallita\n");
+        exit(errno);
+    }
 
-    //eseguo le join
-/*    pthread_join(ptid,NULL);
-    for(int j=0;j<numberThreads;j++){
-        pthread_join(thread_workers,NULL);
+    int chunk = n/p, r= n%p;
+    int start = 0;
+    for(int i=0;i<p; ++i) {
+        thARGS[i].thid = i;
+        thARGS[i].q    = q;
+        thARGS[i].start= start;
+        thARGS[i].stop = start+chunk + ((i<r)?1:0);
+        start = thARGS[i].stop;
+    }
+    for(int i=p;i<(p+c); ++i) {
+        thARGS[i].thid = i-p;
+        thARGS[i].q    = q;
+        thARGS[i].start= 0;
+        thARGS[i].stop = 0;
+    }
+    //sono i workers
+    for(int i=0;i<c; ++i)
+        if (pthread_create(&th[p+i], NULL, Consumer, &thARGS[p+i]) != 0) {
+            fprintf(stderr, "pthread_create failed (Consumer)\n");
+            exit(EXIT_FAILURE);
+        }
+    // è il produttore
+        if (pthread_create(&th[i], NULL, Producer, &thARGS[i]) != 0) {
+            fprintf(stderr, "pthread_create failed (Producer)\n");
+            exit(EXIT_FAILURE);
+        }
 
-    }*/
+    /* possibile protocollo di terminazione:
+     * si aspettano prima tutti i produttori
+     * quindi si inviano 'c' valori speciali (-1)
+     * quindi si aspettano i consumatori
+     */
+    // aspetto prima tutti i produttori
+    for(int i=0;i<p; ++i)
+        pthread_join(th[i], NULL);
+    // quindi termino tutti i consumatori
+    for(int i=0;i<c; ++i) {
+        int *eos = malloc(sizeof(int));
+        *eos = -1;
+        push(q, eos);
+    }
+    // aspetto la terminazione di tutti i consumatori
+    for(int i=0;i<c; ++i)
+        pthread_join(th[p+i], NULL);
+
+    // libero memoria
+    deleteQueue(q);
+    free(th);
+    free(thARGS);
 
     printf("fine main\n");
-
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
     //comunicazione con collector
@@ -263,41 +343,9 @@ int main(int argc, char* argv []){
 
 void *job_of_masterWorker(void* arg){
 
-    pthread_mutex_lock(&mtx);
-    struct llist *head=malloc(sizeof (struct llist));
-
-    listdir("pluto",1,head);
-    StampaLista(head);//è la lista con tutti i file da aprire
-
-    pthread_cond_signal(&cond);
-    pthread_mutex_unlock(&mtx);
-
-
-      return(void*)0;
 }
 
 
 void *job_of_worker(void *arg){
-    int consumed, total=0;
-   // struct file_node* p;
-    int *thread = (int*)arg;
 
-    //printf("head: %s\n\n",head->opzione);
-    printf("worker: %d\n",thread);
-    /*   while(true){
-           pthread_mutex_lock(&mtx);
-           while(head == NULL){
-               pthread_cond_wait(&cond, &mtx);
-               printf("svegliati amico thread\n");
-               fflush(stdout);
-           }
-           //il consumatore prende quel nodo
-          // p=estrai();
-           // elimina quel nodo
-           //delete();*/
-   //        pthread_mutex_unlock(&mtx);
-           // elaborazione di p il file estratto, la somma dei numeri binari
- //          return(void*)0;
-  //     }
-    pthread_exit(NULL);
 }

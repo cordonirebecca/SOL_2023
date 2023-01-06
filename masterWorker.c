@@ -80,16 +80,23 @@ void *job_of_worker();
 void *Producer(void *arg) {
     Queue_t *q  = ((threadArgs_t*)arg)->q;
     int   myid  = ((threadArgs_t*)arg)->thid;
-    char *data = malloc(sizeof(char));
-    if (data == NULL) {
-        perror("Producer malloc");
-        pthread_exit(NULL);
+    int   start = ((threadArgs_t*)arg)->start;
+    int   stop  = ((threadArgs_t*)arg)->stop;
+    char* argomento=((threadArgs_t*)arg)->argument;//deve avere i file
+    for(int i=start;i<stop; ++i) {
+        char *data = malloc(sizeof(int));
+        if (data == NULL) {
+            perror("Producer malloc");
+            pthread_exit(NULL);
+        }
+        data = argomento;
+        if (push(q, data) == -1) {
+            fprintf(stderr, "Errore: push\n");
+            pthread_exit(NULL);
+        }
+        printf("Producer %d pushed <%d>\n", myid, i);
     }
-    data="ciao";
-    if (push(q, data) == -1) {
-        fprintf(stderr, "Errore: push\n");
-        pthread_exit(NULL);
-    }
+    printf("Producer%d exits\n", myid);
     StampaLista(q);
     printf("Producer: %d exits\n", myid);
     return NULL;
@@ -102,8 +109,9 @@ void *Consumer(void *arg) {
 
     size_t consumed = 0;
     while (1) {
-        int *data;
+        char *data;
         data = dequeue(q);
+        StampaLista(q);
         assert(data);
         if (*data == -1) {
             free(data);
@@ -204,7 +212,8 @@ int main(int argc, char* argv []){
 
    //faccio il parsing degli argomenti
     extern char *optarg;
-    int p=1,c=4, n=3;
+    int p=1,c=numberThreads, n=lenghtTail;//è il numero dei messaggi/dei file da mandare
+
 
     printf("num producers =%d, num consumers =%d\n", p, c);
 
@@ -219,6 +228,14 @@ int main(int argc, char* argv []){
     }
 
     Queue_t *q = initQueue();
+    char* argument=malloc(sizeof(char));
+    //mi stampo per sport i file
+    listdir("pluto",0);
+    //illuminazione della notte
+    //faccio un array che mi metto nella struttura condivisa con tutti i file in goni casella
+    //così il for nel producer me lo faccio della dimensione dell?array e poi tiro fuori
+    //e inserisco nella push i vari char alla mia codona queue
+    argument= "non ci si crede";
     if (!q) {
         fprintf(stderr, "initQueue fallita\n");
         exit(errno);
@@ -226,18 +243,21 @@ int main(int argc, char* argv []){
 
     int chunk = n/p, r= n%p;
     int start = 0;
+
     for(int i=0;i<p; ++i) {
         thARGS[i].thid = i;
         thARGS[i].q    = q;
         thARGS[i].start= start;
         thARGS[i].stop = start+chunk + ((i<r)?1:0);
         start = thARGS[i].stop;
+        thARGS[i].argument = argument;
     }
     for(int i=p;i<(p+c); ++i) {
         thARGS[i].thid = i-p;
         thARGS[i].q    = q;
         thARGS[i].start= 0;
         thARGS[i].stop = 0;
+        thARGS[i].argument = argument;
     }
     //sono i workers
     for(int i=0;i<c; ++i)

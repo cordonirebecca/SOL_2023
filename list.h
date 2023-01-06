@@ -32,7 +32,7 @@ void StampaLista(Queue_t *q);
 
 int push(Queue_t *q, char *data);
 
-void listdir(const char *name, int indent,struct llist *l);
+void listdir(const char *name, int indent);
 
 void *dequeue(Queue_t *q);
 

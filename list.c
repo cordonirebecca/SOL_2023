@@ -7,6 +7,8 @@
 #include <assert.h>
 #include <errno.h>
 #include <pthread.h>
+#include <dirent.h>
+#include <string.h>
 
 static inline void freeNode(llist *node)           { free((void*)node); }
 
@@ -91,9 +93,11 @@ int push(Queue_t *q, char *data) {
 }
 
 //funzione che apre tutte le cartelle e mi stampa i file in ognuna
-/*void listdir(const char *name, int indent,struct llist *l){
+void listdir(const char *name, int indent)
+{
     DIR *dir;
     struct dirent *entry;
+
     if (!(dir = opendir(name)))
         return;
 
@@ -102,19 +106,15 @@ int push(Queue_t *q, char *data) {
             char path[1024];
             if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
                 continue;
-            //path è il percorso directory senza i file
             snprintf(path, sizeof(path), "%s/%s", name, entry->d_name);
-            // printf("%*s[%s]\n", indent, "", entry->d_name);
-            listdir(path, indent + 2,l);
+            printf("%*s[%s]\n", indent, "", entry->d_name);
+            listdir(path, indent + 2);
         } else {
-            // sono uno o più file nella directory
-            //  printf("%*s- %s\n", indent, "", entry->d_name);
-            enqueue(l,entry->d_name);
+            printf("%*s- %s\n", indent, "", entry->d_name);
         }
     }
     closedir(dir);
-}*/
-
+}
 //mi elimina il primo elemento della lista e me lo ritorna, così il worker se lo prende
 void *dequeue(Queue_t *q) {
     if (q == NULL) {

@@ -43,7 +43,7 @@ void add_list(struct llist* head, char * opzione);
 
 void print_list(struct llist* head);
 
-void *dequeue(Queue_t *q);
+char *dequeue(Queue_t *q);
 
 unsigned long length(Queue_t *q);
 

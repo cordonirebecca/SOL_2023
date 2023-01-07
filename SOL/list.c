@@ -181,7 +181,7 @@ void listdir(const char *name, int indent,struct llist *l){
 
 
 //mi elimina il primo elemento della lista e me lo ritorna, così il worker se lo prende
-void *dequeue(Queue_t *q) {
+char *dequeue(Queue_t *q) {
     if (q == NULL) {
         errno= EINVAL;
     }
@@ -190,6 +190,7 @@ void *dequeue(Queue_t *q) {
         fprintf(stderr, "ERRORE FATALE lock\n");
         pthread_exit((void*)EXIT_FAILURE);
     }
+    //finchè è vuota
     while(q->head == q->tail) {
         //unlock queue and wait
         if (pthread_cond_wait(&q->qcond, &q->qlock) != 0) {
@@ -197,6 +198,8 @@ void *dequeue(Queue_t *q) {
             pthread_exit((void *) EXIT_FAILURE);
         }
     }
+    //qui è tutto bloccato
+
     assert(q->head->next);
     llist *n  = (llist *)q->head;
     void *data = (q->head->next)->opzione;
@@ -208,6 +211,7 @@ void *dequeue(Queue_t *q) {
         fprintf(stderr, "ERRORE FATALE unlock\n");
         pthread_exit((void*)EXIT_FAILURE);
     }
+    //libero lo spazio
     freeNode(n);
     return data;
 }

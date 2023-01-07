@@ -4,7 +4,12 @@
 
 #ifndef SOL_WORKERS_H
 #define SOL_WORKERS_H
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
-void* startWorker(void* tizio);
+int sommatoria(char* nome_del_file);
+
+int lenght_file(char* nome_del_file);
 
 #endif //SOL_WORKERS_H

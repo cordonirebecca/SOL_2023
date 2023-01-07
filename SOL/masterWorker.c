@@ -72,6 +72,9 @@ struct sockaddr_un server_addr, client_addr;
 char server_message[2000], client_message[2000];
 int i=0;
 
+pthread_mutex_t mtx=PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t cond=PTHREAD_COND_INITIALIZER;
+
 
 void *job_of_masterWorker();
 void *job_of_worker();
@@ -84,13 +87,12 @@ void *Producer(void *arg) {
     int   stop  = ((threadArgs_t*)arg)->stop;
     llist *lista_piena=((threadArgs_t*)arg)->list_file_MasterWorker;//è la lista con tutti i file
 
-    print_list(lista_piena);
-    char *data = malloc(sizeof(int));
+   // print_list(lista_piena);
+    char *data = malloc(sizeof(char));
     if (data == NULL) {
         perror("Producer malloc");
         pthread_exit(NULL);
     }
-
     for(int k=0;k<lenghtTail+1;k++){
         data = file_singolo_da_inserire(lista_piena);
         if (push(q, data) == -1) {
@@ -102,8 +104,8 @@ void *Producer(void *arg) {
        // print_list(lista_piena);
     }
     //stampo la codona da inviare al worker
-    printf("\n\n\n");
-    StampaLista(q);
+   // printf("\n\n\n");
+    //StampaLista(q);
     printf("Producer %d pushed <%d>\n", myid, i);
     printf("Producer: %d exits\n", myid);
     return NULL;
@@ -111,23 +113,29 @@ void *Producer(void *arg) {
 
 // funzione eseguita dal thread consumatore
 void *Consumer(void *arg) {
+    //gli passo la codona piena
     Queue_t *q = ((threadArgs_t *) arg)->q;
     int myid = ((threadArgs_t *) arg)->thid;
-
- /*   size_t consumed = 0;
-    while (1) {
+    size_t consumed = 0;
+    int risultato=0;
+    StampaLista(q);
+    while (true) {
         char *data;
         data = dequeue(q);
-        StampaLista(q);
         assert(data);
-        if (*data == -1) {
+        if (data == NULL) {
             free(data);
             break;
         }
+        printf("DATA: %s\n\n",data);
         ++consumed;
+        //prendiamo il data, ovvero il file e lo apriamo per fare la sommatoria
+        //ritorniamo l'intero
+        //unico problema, non mi apre i file nelle sottodirectories per la sommatoria
+        risultato= sommatoria(data);
         printf("Consumer:  %d, estratto: <%d>\n", myid, *data);
         free(data);
-    }*/
+    }
 }
 
 //comandi del parser
@@ -238,15 +246,9 @@ int main(int argc, char* argv []){
     //è la lista che invio al producer per inserire i vari elementi
     llist *lista_da_inviare= malloc((sizeof(llist)));
     Queue_t *q = initQueue();
-    char* argument=malloc(sizeof(char));
     //mi stampo per sport i file
     listdir("pluto",0,lista_da_inviare);
     // print_list(lista_da_inviare);
-    //illuminazione della notte
-    //faccio un array che mi metto nella struttura condivisa con tutti i file in goni casella
-    //così il for nel producer me lo faccio della dimensione dell?array e poi tiro fuori
-    //e inserisco nella push i vari char alla mia codona queue
-    argument= "non ci si crede";
     if (!q) {
         fprintf(stderr, "initQueue fallita\n");
         exit(errno);
@@ -276,6 +278,7 @@ int main(int argc, char* argv []){
             fprintf(stderr, "pthread_create failed (Consumer)\n");
             exit(EXIT_FAILURE);
         }
+
     // è il produttore
     if (pthread_create(&th, NULL, Producer, &thARGS[i]) != 0) {
         fprintf(stderr, "pthread_create failed (Producer)\n");
@@ -287,17 +290,21 @@ int main(int argc, char* argv []){
      * quindi si inviano 'c' valori speciali (-1)
      * quindi si aspettano i consumatori
      */
-    // aspetto prima tutti i produttori
-        pthread_join(th, NULL);
+    // aspetto prima il produttore
+    pthread_join(th, NULL);
+
     // quindi termino tutti i consumatori
     for(int i=0;i<c; ++i) {
-        int *eos = malloc(sizeof(int));
-        *eos = -1;
+        char *eos = malloc(sizeof(char));
+        *eos = NULL;
         push(q, eos);
     }
+
+    //qui ho un problemone da guardare
     // aspetto la terminazione di tutti i consumatori
-    for(int i=0;i<c; ++i)
+    for(int i=0;i<c; ++i){
         pthread_join(th[p+i], NULL);
+    }
 
     // libero memoria
     deleteQueue(q);

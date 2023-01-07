@@ -5,13 +5,31 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <assert.h>
 #include <signal.h>
+#include <dirent.h>
 #include <pthread.h>
 #include <sys/un.h>
 #include <sys/socket.h>
 #include <errno.h>
+#include <sys/stat.h>
+#include "auxiliaryMW.h"
+#include <ctype.h>
+#include <limits.h>
+#include<dirent.h>
+#include <stdbool.h>
+#include "workers.h"
+#define UNIX_PATH_MAX 255
+#include <arpa/inet.h>
+#include<semaphore.h>
+#define SHARED 1
 #include "list.h"
-#define UNIX_PATH_MAX 108
+#include <dirent.h>
+#include <ctype.h>
+#include <semaphore.h>
+
+#define MAXPATHLEN 100
+
 
 #define ec_meno1(s,m) \
     if((s)==-1) {perror(m); exit(EXIT_FAILURE); \
@@ -21,100 +39,142 @@
     if((s)==NULL) {perror(m); exit(EXIT_FAILURE); \
     }
 
-void signalMask(){
-    struct sigaction sa;
-    sigset_t set;
-    //maschero tutti i segnali
-    ec_meno1(sigfillset(&set),"main");
-    memset(&sa,0,sizeof(sa));
-    sa.sa_handler = SIG_IGN;
+typedef int buffer_item;
+#define BUFFER_SIZE 5
 
-    ec_meno1(sigaction(SIGHUP,&sa,NULL),"main");
-    ec_meno1(sigaction(SIGINT,&sa,NULL),"main");
-    ec_meno1(sigaction(SIGQUIT,&sa,NULL),"main");
-    ec_meno1(sigaction(SIGTERM,&sa,NULL),"main");
-    ec_meno1(sigaction(SIGUSR1,&sa,NULL),"main");
-    ec_meno1(sigaction(SIGPIPE,&sa,NULL),"main");
+// Global variables
+buffer_item buffer[BUFFER_SIZE];
+pthread_mutex_t mutex;
+sem_t full, empty;
+int count, in, out;
 
-    ec_meno1(sigemptyset(&set),"main");
+// Function prototypes
+int insert_item(buffer_item item);
+int remove_item(buffer_item *item);
+void *consumer(void *param);
+void *producer(void *param);
 
-    ec_meno1(sigaddset(&set, SIGHUP),"main");
-    ec_meno1(sigaddset(&set, SIGINT),"main");
-    ec_meno1(sigaddset(&set, SIGQUIT),"main");
-    ec_meno1(sigaddset(&set, SIGTERM),"main");
-    ec_meno1(sigaddset(&set, SIGUSR1),"main");
-    ec_meno1(sigaddset(&set, SIGPIPE),"main");
 
-    ec_meno1(pthread_sigmask(SIG_SETMASK,&set,NULL),"main");
+int numberThreads=4;
+int lenghtTail =8;
+const char* directoryName;
+char path_assoluto [UNIX_PATH_MAX+1];
+int tempo=0;
+pthread_t maskProducer;
+pthread_t thread_workers;
+pthread_t Creatore_thread_workers;
 
-    int sigwaitReturnValue;
-    int indiceSegnale=0;
-    sigwaitReturnValue=sigwait(&set, &indiceSegnale);
-    printf("arrivato segnale:%d\n",indiceSegnale);
+sem_t empty, full,sm;
+int data;
+
+int socket_desc, client_sock, client_size;
+struct sockaddr_un server_addr, client_addr;
+char server_message[2000], client_message[2000];
+int i=0;
+
+
+void *job_of_masterWorker();
+void *job_of_worker();
+
+// funzione eseguita dal thread produttore
+void *Producer(void *arg) {
+    Queue_t *q  = ((threadArgs_t*)arg)->q;
+    int   myid  = ((threadArgs_t*)arg)->thid;
+    int   start = ((threadArgs_t*)arg)->start;
+    int   stop  = ((threadArgs_t*)arg)->stop;
+    llist *lista_piena=((threadArgs_t*)arg)->list_file_MasterWorker;//è la lista con tutti i file
+
+    print_list(lista_piena);
+    char *data = malloc(sizeof(int));
+    if (data == NULL) {
+        perror("Producer malloc");
+        pthread_exit(NULL);
+    }
+
+    for(int k=0;k<lenghtTail+1;k++){
+        data = file_singolo_da_inserire(lista_piena);
+        if (push(q, data) == -1) {
+            fprintf(stderr, "Errore: push\n");
+            pthread_exit(NULL);
+        }
+        //elimino la testa
+        delete_head_lista_piena(&lista_piena,data);
+       // print_list(lista_piena);
+    }
+    //stampo la codona da inviare al worker
+    printf("\n\n\n");
+    StampaLista(q);
+    printf("Producer %d pushed <%d>\n", myid, i);
+    printf("Producer: %d exits\n", myid);
+    return NULL;
 }
 
+// funzione eseguita dal thread consumatore
+void *Consumer(void *arg) {
+    Queue_t *q = ((threadArgs_t *) arg)->q;
+    int myid = ((threadArgs_t *) arg)->thid;
 
+ /*   size_t consumed = 0;
+    while (1) {
+        char *data;
+        data = dequeue(q);
+        StampaLista(q);
+        assert(data);
+        if (*data == -1) {
+            free(data);
+            break;
+        }
+        ++consumed;
+        printf("Consumer:  %d, estratto: <%d>\n", myid, *data);
+        free(data);
+    }*/
+}
+
+//comandi del parser
 int parser(int argc, char*argv[]){
     int c;
     int i=1;
     char* option = NULL;
-    int numberThreads = 0;
-    int lenghtTail = 0;
-    char* directoryName;
-    int time;
-   while((c = getopt(argc, argv, "n:q:d:t:")) != -1){
-       switch(c){
-           case 'n':
-               printf (" è arrivato -n \n");
-               ec_null(c,"main");
-               printf( " argv : %c\n",c);
-               numberThreads = atoi(optarg);
-               printf("numberThreads: %d\n", numberThreads);
-               break;
+    char*ptr;
+    opterr=0;
+    while((c = getopt(argc, argv, "n:q:d:t:")) != -1){
+        switch(c){
+            case 'n':
+                ec_null(c,"main");
+                numberThreads = atoi(optarg);
+                printf("numberThreads: %d\n", numberThreads);
+                break;
 
-           case 'q':
-               printf (" è arrivato -q \n");
-               ec_null(c,"main");
-               printf( " argv: %c\n", c);
-               lenghtTail = atoi(optarg);
-               printf("lenghtail: %d\n", lenghtTail);
-               break;
+            case 'q':
+                ec_null(c,"main");
+                lenghtTail = atoi(optarg);
+                printf("lenghtail: %d\n", lenghtTail);
+                break;
 
-           case 'd':
-               printf (" è arrivato -d \n");
-               ec_null(c,"main");
-               printf( " argv: %c\n", c);
-               directoryName= optarg;
-               printf("directoryName: %s\n", directoryName);
-               break;
+            case 'd':
+                ec_null(c,"main");
+                directoryName= optarg;
+                getPathAssoluto(directoryName);
+                break;
 
-           case 't':
-               printf (" è arrivato -t \n");
-               ec_null(c,"main");
-               printf( " argv: %c\n", c);
-               time= atoi(optarg);
-               printf("time: %d\n", time);
-               break;
-       }
-   }
+            case 't':
+                ec_null(c,"main");
+                tempo= atoi(optarg);
+                break;
+        }
+    }
 }
 
-void* startWorker(void* idWorker){
-    //fare tutto
+struct file_name* estrai(){
+
 }
 
 int main(int argc, char* argv []){
     int pid;
     int status;
-    NodeList *l = NULL;//inizializzo lista
-    l=malloc(sizeof(NodeList));
     pthread_t tid;
-    pthread_t maskProducer;
-    int sum;
-    int err;
-    int fd_skt, fd_c;
-    struct sockaddr_un sa;
-    sa.sun_family=AF_UNIX;
+    pthread_t ptid;
+    char* file_preso;
 
     //creo thread che si occupa della maschera segnali
     if(	pthread_create(&maskProducer, NULL, signalMask, NULL)!=0){
@@ -130,9 +190,9 @@ int main(int argc, char* argv []){
             break;
         }
         case 0:  { //figlio collector
-           // execvp(argv[0], argv);
-           //perror("Errore: exec");//errore collector
-           //printf("sono il figlio con il pid : %d\n\n", getpid());
+            // execvp(argv[0], argv);
+            perror("Errore: exec");//errore collector
+            //printf("sono il figlio con il pid : %d\n\n", getpid());
             sleep(3);
             //printf("sono il figlio sto morendo");
             exit(EXIT_SUCCESS);
@@ -149,47 +209,173 @@ int main(int argc, char* argv []){
                 /* il figlio terminato con exit o return */
                 //printf("stato %d\n", WEXITSTATUS(status));
             }
-            //printf("ho aspettato il figlio sto morendo anch'io\n\n");
         }
     }//fine creazione collector
 
     //gestione parser
     parser(argc, argv);
 
-    //inserisco in modo concorrente i task in coda
-    //vorrei inserire i task con la inserTail ma in mutua eslusione come faccio
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+   //faccio il parsing degli argomenti
+    extern char *optarg;
+    int p=1,c=numberThreads, n=lenghtTail;//è il numero dei messaggi/dei file da mandare
 
 
-    //creo threadWorkers
-    /*if(err = pthread_create(&tid,NULL,startWorker,NULL )){
-        perror("errore creazione threadWorkers");
+    printf("num producers =%d, num consumers =%d\n", p, c);
+
+    pthread_t    *th;
+    threadArgs_t *thARGS;
+
+    th     = malloc((p+c)*sizeof(pthread_t));
+    thARGS = malloc((p+c)*sizeof(threadArgs_t));
+    if (!th || !thARGS) {
+        fprintf(stderr, "malloc fallita\n");
         exit(EXIT_FAILURE);
-    }*/
+    }
+
+
+    //è la lista che invio al producer per inserire i vari elementi
+    llist *lista_da_inviare= malloc((sizeof(llist)));
+    Queue_t *q = initQueue();
+    char* argument=malloc(sizeof(char));
+    //mi stampo per sport i file
+    listdir("pluto",0,lista_da_inviare);
+    // print_list(lista_da_inviare);
+    //illuminazione della notte
+    //faccio un array che mi metto nella struttura condivisa con tutti i file in goni casella
+    //così il for nel producer me lo faccio della dimensione dell?array e poi tiro fuori
+    //e inserisco nella push i vari char alla mia codona queue
+    argument= "non ci si crede";
+    if (!q) {
+        fprintf(stderr, "initQueue fallita\n");
+        exit(errno);
+    }
+
+    int chunk = n/p, r= n%p;
+    int start = 0;
+
+    for(int i=0;i<p; ++i) {
+        thARGS[i].thid = i;
+        thARGS[i].q    = q;
+        thARGS[i].start= start;
+        thARGS[i].stop = start+chunk + ((i<r)?1:0);
+        start = thARGS[i].stop;
+        thARGS[i].list_file_MasterWorker=lista_da_inviare;
+    }
+    for(int i=p;i<(p+c); ++i) {
+        thARGS[i].thid = i-p;
+        thARGS[i].q    = q;
+        thARGS[i].start= 0;
+        thARGS[i].stop = 0;
+        thARGS[i].list_file_MasterWorker=lista_da_inviare;
+    }
+    //sono i workers
+    for(int i=0;i<c; ++i)
+        if (pthread_create(&th[p+i], NULL, Consumer, &thARGS[p+i]) != 0) {
+            fprintf(stderr, "pthread_create failed (Consumer)\n");
+            exit(EXIT_FAILURE);
+        }
+    // è il produttore
+    if (pthread_create(&th, NULL, Producer, &thARGS[i]) != 0) {
+        fprintf(stderr, "pthread_create failed (Producer)\n");
+        exit(EXIT_FAILURE);
+    }
+
+    /* possibile protocollo di terminazione:
+     * si aspettano prima tutti i produttori
+     * quindi si inviano 'c' valori speciali (-1)
+     * quindi si aspettano i consumatori
+     */
+    // aspetto prima tutti i produttori
+        pthread_join(th, NULL);
+    // quindi termino tutti i consumatori
+    for(int i=0;i<c; ++i) {
+        int *eos = malloc(sizeof(int));
+        *eos = -1;
+        push(q, eos);
+    }
+    // aspetto la terminazione di tutti i consumatori
+    for(int i=0;i<c; ++i)
+        pthread_join(th[p+i], NULL);
+
+    // libero memoria
+    deleteQueue(q);
+    free(th);
+    free(thARGS);
+
+    printf("fine main\n");
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
     //comunicazione con collector
-    /*if (fork()!=0) { /* padre, server */
-      /*  fd_skt = socket(AF_UNIX, SOCK_STREAM, 0);
-        if((bind(fd_skt, (struct sockaddr *) &sa, sizeof(sa))) == -1 || errno == EINTR){
-            perror(" errore nella funzione bind");
-            exit(EXIT_FAILURE);
-        }
-        if((listen(fd_skt,SOMAXCONN)) == -1 || errno == EINTR){
-            perror(" errore nella funzione listen");
-            exit(EXIT_FAILURE);
-        }
+    server_addr.sun_family=AF_UNIX;
 
+    // Clean buffers:
+    memset(server_message, '\0', sizeof(server_message));
+    memset(client_message, '\0', sizeof(client_message));
+
+    // Create socket:
+    socket_desc = socket(AF_UNIX, SOCK_STREAM, 0);
+
+    if(socket_desc == -1 && errno == EINTR){
+        printf("Error while creating socket\n");
+        return -1;
     }
-    else{ // figlio
-        fd_skt=socket(AF_UNIX,SOCK_STREAM,0);
-        while (connect(fd_skt,(struct sockaddr*)&sa,sizeof(sa)) == -1 ) {
-            if ( errno == ENOENT ){
-                sleep(1); /* socket non esiste */
-            /*}
-            else {
-                exit(EXIT_FAILURE);
-            }
-        }
+    printf("Socket created successfully\n");
+
+    // Bind to the set port and IP:
+    if(bind(socket_desc, (struct sockaddr*)&server_addr, sizeof(server_addr))== -1 && errno==EINTR){
+        printf("Couldn't bind to the port\n");
+        return -1;
     }
-*/
-        return 0;
+    printf("Done with binding\n");
+
+    // Listen for clients:
+    if(listen(socket_desc, SOMAXCONN)== -1 && errno == EINTR ){
+        printf("Error while listening\n");
+        return -1;
+    }
+    printf("\nListening for incoming connections.....\n");
+
+
+    // Accept an incoming connection:
+    client_size = sizeof(client_addr);
+    client_sock = accept(socket_desc, (struct sockaddr*)&client_addr, &client_size);
+
+    if (client_sock < 0){
+        printf("Can't accept\n");
+        return -1;
+    }
+    //printf("Client connected at IP: %s and port: %i\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+
+    // Receive client's message:
+    if (recv(client_sock, client_message, sizeof(client_message), 0) < 0){
+        printf("Couldn't receive\n");
+        return -1;
+    }
+    printf("Msg from client: %s\n", client_message);
+
+    // Respond to client:
+    strcpy(server_message, "This is the server's message.");
+
+    if (send(client_sock, server_message, strlen(server_message), 0) < 0){
+        printf("Can't send\n");
+        return -1;
+    }
+
+    // Closing the socket:
+    close(client_sock);
+    close(socket_desc);
+
+    return 0;
+}
+
+
+void *job_of_masterWorker(void* arg){
+
+}
+
+
+void *job_of_worker(void *arg){
+
 }

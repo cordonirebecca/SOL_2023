@@ -6,6 +6,7 @@
 #define SOL_LIST_H
 
 #include <pthread.h>
+#define NUM_STRING 10
 
 typedef struct llist{
     char* opzione;
@@ -32,9 +33,19 @@ void StampaLista(Queue_t *q);
 
 int push(Queue_t *q, char *data);
 
-void listdir(const char *name, int indent);
+char* file_singolo_da_inserire(struct llist* head);
 
-void *dequeue(Queue_t *q);
+void delete_head_lista_piena(struct llist** head,char* data);
+
+void listdir(const char *name, int indent,struct llist *l);
+
+char* Look_for_file(char* filename,char* directorydipartenza,int indent);
+
+void add_list(struct llist* head, char * opzione);
+
+void print_list(struct llist* head);
+
+char *dequeue(Queue_t *q);
 
 unsigned long length(Queue_t *q);
 

@@ -72,6 +72,9 @@ struct sockaddr_un server_addr, client_addr;
 char server_message[2000], client_message[2000];
 int i=0;
 
+pthread_mutex_t mtx=PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t cond=PTHREAD_COND_INITIALIZER;
+
 
 void *job_of_masterWorker();
 void *job_of_worker();
@@ -82,42 +85,56 @@ void *Producer(void *arg) {
     int   myid  = ((threadArgs_t*)arg)->thid;
     int   start = ((threadArgs_t*)arg)->start;
     int   stop  = ((threadArgs_t*)arg)->stop;
-    char* argomento=((threadArgs_t*)arg)->argument;//deve avere i file
-    for(int i=start;i<stop; ++i) {
-        char *data = malloc(sizeof(int));
-        if (data == NULL) {
-            perror("Producer malloc");
-            pthread_exit(NULL);
-        }
-        data = argomento;
+    llist *lista_piena=((threadArgs_t*)arg)->list_file_MasterWorker;//è la lista con tutti i file
+
+   // print_list(lista_piena);
+    char *data = malloc(sizeof(char));
+    if (data == NULL) {
+        perror("Producer malloc");
+        pthread_exit(NULL);
+    }
+    for(int k=0;k<lenghtTail+1;k++){
+        data = file_singolo_da_inserire(lista_piena);
         if (push(q, data) == -1) {
             fprintf(stderr, "Errore: push\n");
             pthread_exit(NULL);
         }
-        printf("Producer %d pushed <%d>\n", myid, i);
+        //elimino la testa
+        delete_head_lista_piena(&lista_piena,data);
+       // print_list(lista_piena);
     }
-    printf("Producer%d exits\n", myid);
-    StampaLista(q);
+    //stampo la codona da inviare al worker
+   // printf("\n\n\n");
+    //StampaLista(q);
+    printf("Producer %d pushed <%d>\n", myid, i);
     printf("Producer: %d exits\n", myid);
     return NULL;
 }
 
 // funzione eseguita dal thread consumatore
 void *Consumer(void *arg) {
+    //gli passo la codona piena
     Queue_t *q = ((threadArgs_t *) arg)->q;
     int myid = ((threadArgs_t *) arg)->thid;
-
     size_t consumed = 0;
-    while (1) {
+    int risultato=0;
+    StampaLista(q);
+    while (true) {
         char *data;
         data = dequeue(q);
-        StampaLista(q);
         assert(data);
-        if (*data == -1) {
+        if (data == NULL) {
             free(data);
             break;
         }
+        printf("DATA: %s\n\n",data);
         ++consumed;
+        //prendiamo il data, ovvero il file e lo apriamo per fare la sommatoria
+        //ritorniamo l'intero
+        //unico problema, non mi apre i file nelle sottodirectories per la sommatoria
+        printf("PATH ASSOLUTO: %s\n\n", getPathAssoluto(data));
+        risultato= sommatoria(data);
+        printf("RISULTATO: %d\n\n\n",risultato);
         printf("Consumer:  %d, estratto: <%d>\n", myid, *data);
         free(data);
     }
@@ -208,10 +225,16 @@ int main(int argc, char* argv []){
     //gestione parser
     parser(argc, argv);
 
+    ////////////////////////////////////////
+    printf("nel main: %s\n\n", Look_for_file("hola.txt","pluto",0));
+
+    printf("RISULTATO SOMMA: %d\n\n", sommatoria("pluto/pippo/rebi/addio.txt"));
+
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
    //faccio il parsing degli argomenti
-    extern char *optarg;
+/*    extern char *optarg;
     int p=1,c=numberThreads, n=lenghtTail;//è il numero dei messaggi/dei file da mandare
 
 
@@ -227,15 +250,13 @@ int main(int argc, char* argv []){
         exit(EXIT_FAILURE);
     }
 
+
+    //è la lista che invio al producer per inserire i vari elementi
+    llist *lista_da_inviare= malloc((sizeof(llist)));
     Queue_t *q = initQueue();
-    char* argument=malloc(sizeof(char));
     //mi stampo per sport i file
-    listdir("pluto",0);
-    //illuminazione della notte
-    //faccio un array che mi metto nella struttura condivisa con tutti i file in goni casella
-    //così il for nel producer me lo faccio della dimensione dell?array e poi tiro fuori
-    //e inserisco nella push i vari char alla mia codona queue
-    argument= "non ci si crede";
+    listdir("pluto",0,lista_da_inviare);
+    // print_list(lista_da_inviare);
     if (!q) {
         fprintf(stderr, "initQueue fallita\n");
         exit(errno);
@@ -250,14 +271,14 @@ int main(int argc, char* argv []){
         thARGS[i].start= start;
         thARGS[i].stop = start+chunk + ((i<r)?1:0);
         start = thARGS[i].stop;
-        thARGS[i].argument = argument;
+        thARGS[i].list_file_MasterWorker=lista_da_inviare;
     }
     for(int i=p;i<(p+c); ++i) {
         thARGS[i].thid = i-p;
         thARGS[i].q    = q;
         thARGS[i].start= 0;
         thARGS[i].stop = 0;
-        thARGS[i].argument = argument;
+        thARGS[i].list_file_MasterWorker=lista_da_inviare;
     }
     //sono i workers
     for(int i=0;i<c; ++i)
@@ -265,35 +286,39 @@ int main(int argc, char* argv []){
             fprintf(stderr, "pthread_create failed (Consumer)\n");
             exit(EXIT_FAILURE);
         }
+
     // è il produttore
-        if (pthread_create(&th[i], NULL, Producer, &thARGS[i]) != 0) {
-            fprintf(stderr, "pthread_create failed (Producer)\n");
-            exit(EXIT_FAILURE);
-        }
+    if (pthread_create(&th, NULL, Producer, &thARGS[i]) != 0) {
+        fprintf(stderr, "pthread_create failed (Producer)\n");
+        exit(EXIT_FAILURE);
+    }
 
     /* possibile protocollo di terminazione:
      * si aspettano prima tutti i produttori
      * quindi si inviano 'c' valori speciali (-1)
      * quindi si aspettano i consumatori
      */
-    // aspetto prima tutti i produttori
-    for(int i=0;i<p; ++i)
-        pthread_join(th[i], NULL);
+    // aspetto prima il produttore
+/*    pthread_join(th, NULL);
+
     // quindi termino tutti i consumatori
     for(int i=0;i<c; ++i) {
-        int *eos = malloc(sizeof(int));
-        *eos = -1;
+        char *eos = malloc(sizeof(char));
+        *eos = NULL;
         push(q, eos);
     }
+
+    //qui ho un problemone da guardare
     // aspetto la terminazione di tutti i consumatori
-    for(int i=0;i<c; ++i)
+    for(int i=0;i<c; ++i){
         pthread_join(th[p+i], NULL);
+    }
 
     // libero memoria
     deleteQueue(q);
     free(th);
     free(thARGS);
-
+*/
     printf("fine main\n");
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 

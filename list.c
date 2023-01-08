@@ -180,38 +180,30 @@ void listdir(const char *name, int indent,struct llist *l){
     closedir(dir);
 }
 
-char* Look_for_file(char* filename, char* directorydipartenza, int indent){
+void Look_for_file(char* filename, char* directorydipartenza, int indent, char* path_risultato){
     DIR *dir;
     struct dirent *entry;
-    char*risultato=malloc(sizeof(char)*100);
-    char*aggiungo_al_path= malloc(sizeof (char));
-
     if (!(dir = opendir(directorydipartenza))){
-        printf("ma sono qui?\n\n");
-        return NULL;
+        return;
     }
-
-    strcat(aggiungo_al_path,directorydipartenza);
-
     while ((entry = readdir(dir)) != NULL) {
         if (entry->d_type == DT_DIR) {
             char path[1024];
             if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
                 continue;
             snprintf(path, sizeof(path), "%s/%s", directorydipartenza, entry->d_name);
-            Look_for_file(filename,path, indent + 2);
+            Look_for_file(filename,path, indent + 2,path_risultato);
         } else {
             if((strcmp(entry->d_name,filename))==0){
                 //ritorno il percorso file ed esco
-                strcat(risultato,aggiungo_al_path);
-                strcat(risultato,"/");
-                strcat(risultato,entry->d_name);
-                printf("risultato nella funzione:%s\n\n",risultato);
-                return risultato;
+                strcat(path_risultato,directorydipartenza);
+                strcat(path_risultato,"/");
+                strcat(path_risultato,entry->d_name);
             }
         }
     }
     closedir(dir);
+    printf("path nell funzione %s\n\n",path_risultato);
 }
 
 //mi elimina il primo elemento della lista e me lo ritorna, così il worker se lo prende

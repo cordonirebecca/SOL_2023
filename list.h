@@ -39,7 +39,7 @@ void delete_head_lista_piena(struct llist** head,char* data);
 
 void listdir(const char *name, int indent,struct llist *l);
 
-char* Look_for_file(char* filename,char* directorydipartenza,int indent);
+void Look_for_file(char* filename, char* directorydipartenza, int indent, char* path_risultato);
 
 void add_list(struct llist* head, char * opzione);
 

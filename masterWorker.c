@@ -226,7 +226,11 @@ int main(int argc, char* argv []){
     parser(argc, argv);
 
     ////////////////////////////////////////
-    printf("nel main: %s\n\n", Look_for_file("hola.txt","pluto",0));
+    char*risultato=malloc(sizeof(char));
+
+    Look_for_file("hola.txt","pluto",0,risultato);
+
+    printf("nel main : %s\n\n",risultato);
 
     printf("RISULTATO SOMMA: %d\n\n", sommatoria("pluto/pippo/rebi/addio.txt"));
 

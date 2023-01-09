@@ -12,10 +12,13 @@ typedef struct threadArgs {
     Queue_t *q;
     int      start;
     int      stop;
+    llist *list_file_MasterWorker;
 } threadArgs_t;
 
 
 extern void signalMask();
+
+char* get_path_file(char *file);
 
 char* getPathAssoluto(char* directoryName);
 

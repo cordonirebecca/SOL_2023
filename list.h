@@ -11,6 +11,8 @@
 typedef struct llist{
     char* opzione;
     struct llist *next;
+    pthread_mutex_t qlock;
+    pthread_cond_t  qcond;
 } llist;
 
 typedef struct Queue {
@@ -20,6 +22,12 @@ typedef struct Queue {
     pthread_mutex_t qlock;
     pthread_cond_t  qcond;
 } Queue_t;
+
+typedef struct file_structure{
+    char* nomeFile;
+    pthread_mutex_t lock;
+    pthread_mutex_t fcond;
+}file_structure;
 
 Queue_t *initQueue();
 
@@ -39,7 +47,7 @@ void delete_head_lista_piena(struct llist** head,char* data);
 
 void listdir(const char *name, int indent,struct llist *l);
 
-void Look_for_file(char* filename, char* directorydipartenza, int indent, char* path_risultato);
+void Look_for_file(char* filename, char* directorydipartenza, int indent, file_structure *path_risultato);
 
 void add_list(struct llist* head, char * opzione);
 

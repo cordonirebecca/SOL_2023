@@ -9,6 +9,7 @@
 #include <pthread.h>
 #include <dirent.h>
 #include <string.h>
+#include <time.h>
 
 static inline void freeNode(llist *node)           { free((void*)node); }
 
@@ -64,10 +65,14 @@ void StampaLista(Queue_t *q){
 }
 
 int push(Queue_t *q, char *data) {
-    if ((q == NULL) || (data == NULL)) { errno= EINVAL; return -1;}
-    llist *n = malloc(sizeof(llist));
-    if (!n)
+    if ((q == NULL) || (data == NULL)) {
+        errno= EINVAL;
         return -1;
+    }
+    llist *n = malloc(sizeof(llist));
+    if (!n){
+        return -1;
+    }
     n->opzione = data;
     n->next = NULL;
     //lock queue
@@ -78,14 +83,14 @@ int push(Queue_t *q, char *data) {
     q->tail->next = n;
     q->tail       = n;
     q->qlen+= 1;
-    //sblocco queue
-    if (pthread_mutex_unlock(&q->qlock)!=0){
-        fprintf(stderr, "ERRORE FATALE unlock\n");
-        pthread_exit((void*)EXIT_FAILURE);
-    }
     //mando segnale che c'è un valore in lista
     if (pthread_cond_signal(&q->qcond)!=0){
         fprintf(stderr, "ERRORE FATALE signal\n");
+        pthread_exit((void*)EXIT_FAILURE);
+    }
+    //sblocco queue
+    if (pthread_mutex_unlock(&q->qlock)!=0){
+        fprintf(stderr, "ERRORE FATALE unlock\n");
         pthread_exit((void*)EXIT_FAILURE);
     }
     return 0;
@@ -109,7 +114,7 @@ void delete_head_lista_piena(struct llist** head,char* data){
 char* file_singolo_da_inserire(struct llist* head){
     char* File_singolo;
     if(head == NULL){
-        printf("lista vuota\n");
+        printf("NULL");
         return NULL;
     }
     return File_singolo=head->opzione;
@@ -124,22 +129,21 @@ void print_list(struct llist* head){
         exit(1);
     }
 
-    if(is_empty_list(head)){
-        printf("Lista vuota\n");
-    }
-    else{
-        printf("Lista da inserire: ");
-        while (temp != NULL){
-            printf(" %s -> ", temp->opzione);
-            temp = temp->next;
-        }
-        printf("\n");
+    printf("Lista da inserire: ");
+    while (temp != NULL){
+        printf(" %s -> ", temp->opzione);
+        temp = temp->next;
     }
 }
 
 void add_list(struct llist* head, char * opzione){
     struct llist *new= malloc(sizeof(struct llist));
     struct llist *nodoCorrente= malloc(sizeof(struct llist));
+    //lock della lista
+    if (pthread_mutex_lock(&head->qlock)!=0){
+        fprintf(stderr, "ERRORE FATALE lock\n");
+        pthread_exit((void*)EXIT_FAILURE);
+    }
     new->opzione=malloc(80* sizeof(char));
     strcpy(new->opzione,opzione);
     new->next=NULL;
@@ -152,6 +156,16 @@ void add_list(struct llist* head, char * opzione){
         }
     }
     nodoCorrente->next=new;
+    //sblocco queue
+    if (pthread_mutex_unlock(&head->qlock)!=0){
+        fprintf(stderr, "ERRORE FATALE unlock\n");
+        pthread_exit((void*)EXIT_FAILURE);
+    }
+    //mando segnale che c'è un valore in lista
+    if (pthread_cond_signal(&head->qcond)!=0){
+        fprintf(stderr, "ERRORE FATALE signal\n");
+        pthread_exit((void*)EXIT_FAILURE);
+    }
 }
 
 //funzione che apre tutte le cartelle e mi stampa i file in ognuna
@@ -169,18 +183,19 @@ void listdir(const char *name, int indent,struct llist *l){
             //path è il percorso directory senza i file
             snprintf(path, sizeof(path), "%s/%s", name, entry->d_name);
             printf("PATH: %s\n\n",entry->d_name);
-             printf("%*s[%s]\n", indent, "", entry->d_name);
+            printf("%*s[%s]\n", indent, "", entry->d_name);
             listdir(path, indent + 2,l);
         } else {
             // sono uno o più file nella directory
-              printf("%*s- %s\n", indent, "", entry->d_name);
+            printf("%*s- %s\n", indent, "", entry->d_name);
+            //qui riempio la lista che poi passo al producer
             add_list(l,entry->d_name);
         }
     }
     closedir(dir);
 }
 
-void Look_for_file(char* filename, char* directorydipartenza, int indent, char* path_risultato){
+void Look_for_file(char* filename, char* directorydipartenza, int indent, file_structure *path_risultato){
     DIR *dir;
     struct dirent *entry;
     if (!(dir = opendir(directorydipartenza))){
@@ -196,22 +211,24 @@ void Look_for_file(char* filename, char* directorydipartenza, int indent, char* 
         } else {
             if((strcmp(entry->d_name,filename))==0){
                 //ritorno il percorso file ed esco
-                strcat(path_risultato,directorydipartenza);
-                strcat(path_risultato,"/");
-                strcat(path_risultato,entry->d_name);
+                strcat(path_risultato->nomeFile,directorydipartenza);
+                strcat(path_risultato->nomeFile,"/");
+                strcat(path_risultato->nomeFile,entry->d_name);
+                printf("AUS IN FUNZIONE: %s\n\n",path_risultato->nomeFile);
             }
         }
     }
     closedir(dir);
-    printf("path nell funzione %s\n\n",path_risultato);
+ //   printf("path nell funzione %s\n\n",path_risultato);
 }
 
 //mi elimina il primo elemento della lista e me lo ritorna, così il worker se lo prende
 char *dequeue(Queue_t *q) {
     if (q == NULL) {
         errno= EINVAL;
+        return NULL;
     }
-    //lock queue
+    //blocco coda
     if (pthread_mutex_lock(&q->qlock)!=0){
         fprintf(stderr, "ERRORE FATALE lock\n");
         pthread_exit((void*)EXIT_FAILURE);
@@ -225,7 +242,6 @@ char *dequeue(Queue_t *q) {
         }
     }
     //qui è tutto bloccato
-
     assert(q->head->next);
     llist *n  = (llist *)q->head;
     void *data = (q->head->next)->opzione;
@@ -249,7 +265,7 @@ unsigned long length(Queue_t *q) {
         pthread_exit((void*)EXIT_FAILURE);
     }
     unsigned long len = q->qlen;
-   // UnlockQueue
+    // UnlockQueue
     if (pthread_mutex_unlock(&q->qlock)!=0){
         fprintf(stderr, "ERRORE FATALE unlock\n");
         pthread_exit((void*)EXIT_FAILURE);

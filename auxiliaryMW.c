@@ -65,6 +65,12 @@ void signalMask(){
     printf("arrivato segnale:%d\n",indiceSegnale);
 }
 
+char* get_path_file(char *file){
+    char*ptr;
+    ptr= realpath(file,ptr);
+    printf("PTR: %s\n\n",ptr);
+}
+
 
 char* getPathAssoluto(char* directoryName){
     char*res=realpath(directoryName, buf); // buf ha il path assoluto

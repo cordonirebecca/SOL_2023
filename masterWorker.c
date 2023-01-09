@@ -72,10 +72,6 @@ struct sockaddr_un server_addr, client_addr;
 char server_message[2000], client_message[2000];
 int i=0;
 
-pthread_mutex_t mtx=PTHREAD_MUTEX_INITIALIZER;
-pthread_cond_t cond=PTHREAD_COND_INITIALIZER;
-
-
 void *job_of_masterWorker();
 void *job_of_worker();
 
@@ -85,28 +81,31 @@ void *Producer(void *arg) {
     int   myid  = ((threadArgs_t*)arg)->thid;
     int   start = ((threadArgs_t*)arg)->start;
     int   stop  = ((threadArgs_t*)arg)->stop;
-    llist *lista_piena=((threadArgs_t*)arg)->list_file_MasterWorker;//è la lista con tutti i file
+    llist *lista_piena=((threadArgs_t*)arg)->list_file_MasterWorker;//è la lista con tutti i file piena ammodo
 
-   // print_list(lista_piena);
-    char *data = malloc(sizeof(char));
-    if (data == NULL) {
-        perror("Producer malloc");
-        pthread_exit(NULL);
-    }
-    for(int k=0;k<lenghtTail+1;k++){
+    for(int k=0;k<lenghtTail;k++){
+        char *data = malloc(sizeof(char));
+        if (data == NULL) {
+            perror("Producer malloc");
+            pthread_exit(NULL);
+        }
+        //dalla lista piena copio gli argomenti nel data
+        //printf("inserisco in data\n\n");
         data = file_singolo_da_inserire(lista_piena);
+        //print_list(lista_piena);
+        //insrisco nella coda condivisa
         if (push(q, data) == -1) {
             fprintf(stderr, "Errore: push\n");
             pthread_exit(NULL);
         }
         //elimino la testa
         delete_head_lista_piena(&lista_piena,data);
-       // print_list(lista_piena);
+        printf("Producer %d pushed <%s>\n", myid, data);
     }
     //stampo la codona da inviare al worker
-   // printf("\n\n\n");
+    //printf("CODONA NEL MASTER\n\n\n");
+    //ho un null all'inizio non si sa come mai
     //StampaLista(q);
-    printf("Producer %d pushed <%d>\n", myid, i);
     printf("Producer: %d exits\n", myid);
     return NULL;
 }
@@ -114,11 +113,12 @@ void *Producer(void *arg) {
 // funzione eseguita dal thread consumatore
 void *Consumer(void *arg) {
     //gli passo la codona piena
+    file_structure *aus= malloc(sizeof(file_structure));
     Queue_t *q = ((threadArgs_t *) arg)->q;
     int myid = ((threadArgs_t *) arg)->thid;
+    char *path_completo=malloc(sizeof(char)*100);
     size_t consumed = 0;
-    int risultato=0;
-    StampaLista(q);
+    int risultato = 0;
     while (true) {
         char *data;
         data = dequeue(q);
@@ -127,17 +127,127 @@ void *Consumer(void *arg) {
             free(data);
             break;
         }
-        printf("DATA: %s\n\n",data);
         ++consumed;
+        printf("Consumer:  %d, dato estratto: <%s>\n", myid, data);
+        aus->nomeFile=path_completo;
+        printf("AUS: %s\n\n",aus->nomeFile);
+        //prendo il path di data; e lo salvo il path_completo
+        //si corrompe pathcompleto
+        Look_for_file(data, "pluto", 0, aus);
         //prendiamo il data, ovvero il file e lo apriamo per fare la sommatoria
         //ritorniamo l'intero
-        //unico problema, non mi apre i file nelle sottodirectories per la sommatoria
-        printf("PATH ASSOLUTO: %s\n\n", getPathAssoluto(data));
-        risultato= sommatoria(data);
-        printf("RISULTATO: %d\n\n\n",risultato);
-        printf("Consumer:  %d, estratto: <%d>\n", myid, *data);
+        //printf("path_completo nel consumer %s\n\n",path_completo);
+        risultato = sommatoria(aus->nomeFile);
+        printf("RISULTATO: %d\n\n\n", risultato);
         free(data);
+        free(aus);
     }
+    printf("Consumer %d, consumed <%ld> messages, now it exits\n", myid, consumed);
+}
+static int quiet=0;
+
+int isdot(const char dir[]) {
+    int l = strlen(dir);
+    if ( (l>0 && dir[l-1] == '.') ) return 1;
+    return 0;
+}
+
+//fa solo la malloc per buff
+char* cwd() {
+    char* buf = malloc(NAME_MAX*sizeof(char));
+    if (!buf) {
+        perror("cwd malloc");
+        return NULL;
+    }
+    if (getcwd(buf, NAME_MAX) == NULL) {
+        if (errno==ERANGE) { // il buffer e' troppo piccolo, lo allargo
+            char* buf2 = realloc(buf, 2*NAME_MAX*sizeof(char));
+            if (!buf2) {
+                perror("cwd realloc");
+                free(buf);
+                return NULL;
+            }
+            buf = buf2;
+            if (getcwd(buf,2*NAME_MAX)==NULL) { // mi arrendo....
+                if (!quiet) perror("cwd eseguendo getcwd");
+                free(buf);
+                return NULL;
+            }
+        } else {
+            if (!quiet) perror("cwd eseguendo getcwd");
+            free(buf);
+            return NULL;
+        }
+    }
+    return buf;
+}
+
+char *strremove(char *str, const char *sub) {
+    size_t len = strlen(sub);
+    if (len > 0) {
+        char *p = str;
+        while ((p = strstr(p, sub)) != NULL) {
+            memmove(p, p + len, strlen(p + len) + 1);
+        }
+    }
+    return str;
+}
+
+int find(const char nomedir[], const char nomefile[]) {
+    // entro nella directory cosi' da poter fare opendir(".")
+    if (chdir(nomedir) == -1) {
+        if (!quiet) printf("Impossibile entrare nella directory %s\n", nomedir);
+        return 0;
+    }
+    DIR *dir;
+    if ((dir = opendir(".")) == NULL) {
+        if (!quiet) printf("Errore aprendo la directory %s\n", nomedir);
+        return -1;
+    } else {
+        struct dirent *file;
+        while ((errno = 0, file = readdir(dir)) != NULL) {
+            struct stat statbuf;
+            if (stat(file->d_name, &statbuf) == -1) {
+                if (!quiet) {
+                    perror("stat");
+                    printf("Errore facendo stat di %s\n", file->d_name);
+                }
+                return -1;
+            }
+            if (S_ISDIR(statbuf.st_mode)) {
+                if (!isdot(file->d_name)) {//se è una cartella interna
+                    if (find(file->d_name, nomefile) != 0) {
+                        //entro nelle sottodirectories
+                        if (chdir("..") == -1) {
+                            printf("Impossibile risalire alla directory padre.\n");
+                            return -1;
+                        }
+                    }
+                }
+            } else {//se è un file entro qui
+                if (strncmp(file->d_name, nomefile, strlen(nomefile)) == 0) {
+                    char *buf = cwd();
+                    printf("buf: %s\n\n",buf);
+                    char *pos = strrchr(buf, 'SOL');
+                    printf("POS%s\n", pos);
+                    char* res= malloc(sizeof(char)*100);
+                    res=strremove(pos,"L/");
+                    printf("RES: %s\n\n",res);
+
+                    char*rest=malloc(sizeof(char)*100);
+                    if (buf == NULL) return -1;
+                    strcat(rest,res);
+                    strcat(rest,"/");
+                    strcat(rest,file->d_name);
+                    printf("REST: %s",rest);
+                    free(buf);
+                }
+            }
+        }
+        if (errno != 0) perror("readdir");
+        closedir(dir);
+    }
+    return 1;
 }
 
 //comandi del parser
@@ -225,50 +335,38 @@ int main(int argc, char* argv []){
     //gestione parser
     parser(argc, argv);
 
-    ////////////////////////////////////////
-    char*risultato=malloc(sizeof(char));
+    find("pluto","ciao1.txt");
 
-    Look_for_file("hola.txt","pluto",0,risultato);
-
-    printf("nel main : %s\n\n",risultato);
-
-    printf("RISULTATO SOMMA: %d\n\n", sommatoria("pluto/pippo/rebi/addio.txt"));
 
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-   //faccio il parsing degli argomenti
-/*    extern char *optarg;
+    //faccio il parsing degli argomenti
+ /*   extern char *optarg;
     int p=1,c=numberThreads, n=lenghtTail;//è il numero dei messaggi/dei file da mandare
-
-
     printf("num producers =%d, num consumers =%d\n", p, c);
-
     pthread_t    *th;
     threadArgs_t *thARGS;
-
     th     = malloc((p+c)*sizeof(pthread_t));
     thARGS = malloc((p+c)*sizeof(threadArgs_t));
     if (!th || !thARGS) {
         fprintf(stderr, "malloc fallita\n");
         exit(EXIT_FAILURE);
     }
-
-
     //è la lista che invio al producer per inserire i vari elementi
     llist *lista_da_inviare= malloc((sizeof(llist)));
     Queue_t *q = initQueue();
-    //mi stampo per sport i file
+    //ho riempito la lista da inviare al consumer
     listdir("pluto",0,lista_da_inviare);
-    // print_list(lista_da_inviare);
+    //print_list(lista_da_inviare);
     if (!q) {
         fprintf(stderr, "initQueue fallita\n");
         exit(errno);
     }
-
     int chunk = n/p, r= n%p;
     int start = 0;
 
+    //inizializzo la struttura per il producer
     for(int i=0;i<p; ++i) {
         thARGS[i].thid = i;
         thARGS[i].q    = q;
@@ -277,6 +375,8 @@ int main(int argc, char* argv []){
         start = thARGS[i].stop;
         thARGS[i].list_file_MasterWorker=lista_da_inviare;
     }
+
+    //inizializzo la struttura per il worker
     for(int i=p;i<(p+c); ++i) {
         thARGS[i].thid = i-p;
         thARGS[i].q    = q;
@@ -284,40 +384,34 @@ int main(int argc, char* argv []){
         thARGS[i].stop = 0;
         thARGS[i].list_file_MasterWorker=lista_da_inviare;
     }
-    //sono i workers
-    for(int i=0;i<c; ++i)
-        if (pthread_create(&th[p+i], NULL, Consumer, &thARGS[p+i]) != 0) {
-            fprintf(stderr, "pthread_create failed (Consumer)\n");
-            exit(EXIT_FAILURE);
-        }
 
-    // è il produttore
-    if (pthread_create(&th, NULL, Producer, &thARGS[i]) != 0) {
+    // è il produttore con la coda già piena
+    if (pthread_create(&th, NULL, Producer, (void*)&thARGS[i]) != 0) {
         fprintf(stderr, "pthread_create failed (Producer)\n");
         exit(EXIT_FAILURE);
     }
 
+    //sono i workers
+    for(int i=0;i<c; ++i)
+        if (pthread_create(&th[p+i], NULL, Consumer, (void*)&thARGS[p+i]) != 0) {
+            fprintf(stderr, "pthread_create failed (Consumer)\n");
+            exit(EXIT_FAILURE);
+        }
     /* possibile protocollo di terminazione:
      * si aspettano prima tutti i produttori
      * quindi si inviano 'c' valori speciali (-1)
      * quindi si aspettano i consumatori
      */
     // aspetto prima il produttore
-/*    pthread_join(th, NULL);
+ /*   printf("join produttore\n\n");
+    pthread_join(th, NULL);
 
-    // quindi termino tutti i consumatori
-    for(int i=0;i<c; ++i) {
-        char *eos = malloc(sizeof(char));
-        *eos = NULL;
-        push(q, eos);
-    }
-
+    printf("join workers");
     //qui ho un problemone da guardare
     // aspetto la terminazione di tutti i consumatori
     for(int i=0;i<c; ++i){
         pthread_join(th[p+i], NULL);
     }
-
     // libero memoria
     deleteQueue(q);
     free(th);

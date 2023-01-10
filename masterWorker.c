@@ -27,8 +27,38 @@
 #include <dirent.h>
 #include <ctype.h>
 #include <semaphore.h>
+#include <unistd.h>
+#include <assert.h>
+#include <stdio.h>
+#include <string.h>
+#include <assert.h>
+#include <stdlib.h>
+#include <sys/wait.h>
+#include <sys/uio.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <sys/uio.h>
+#include <sys/un.h>
+#include <errno.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdarg.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+#include <pthread.h>
+#include <errno.h>
+
+#define SOCKNAME     "./cs_sock"
+#define MAXBACKLOG   32
+
 
 #define MAXPATHLEN 100
+#define CHECKNULL(r,c,e) CHECK_EQ_EXIT(e, (r=c), NULL,e,"")
 
 
 #define ec_meno1(s,m) \
@@ -41,6 +71,179 @@
 
 typedef int buffer_item;
 #define BUFFER_SIZE 5
+
+
+/** Evita letture parziali
+ *
+ *   \retval -1   errore (errno settato)
+ *   \retval  0   se durante la lettura da fd leggo EOF
+ *   \retval size se termina con successo
+ */
+static inline int readn(long fd, void *buf, size_t size) {
+    size_t left = size;
+    int r;
+    char *bufptr = (char*)buf;
+    while(left>0) {
+        if ((r=read((int)fd ,bufptr,left)) == -1) {
+            if (errno == EINTR) continue;
+            return -1;
+        }
+        if (r == 0) return 0;   // EOF
+        left    -= r;
+        bufptr  += r;
+    }
+    return size;
+}
+
+/** Evita scritture parziali
+ *
+ *   \retval -1   errore (errno settato)
+ *   \retval  0   se durante la scrittura la write ritorna 0
+ *   \retval  1   se la scrittura termina con successo
+ */
+static inline int writen(long fd, void *buf, size_t size) {
+    size_t left = size;
+    int r;
+    char *bufptr = (char*)buf;
+    while(left>0) {
+        if ((r=write((int)fd ,bufptr,left)) == -1) {
+            if (errno == EINTR) continue;
+            return -1;
+        }
+        if (r == 0) return 0;
+        left    -= r;
+        bufptr  += r;
+    }
+    return 1;
+}
+
+
+
+#if !defined(BUFSIZE)
+#define BUFSIZE 256
+#endif
+
+#if !defined(EXTRA_LEN_PRINT_ERROR)
+#define EXTRA_LEN_PRINT_ERROR   512
+#endif
+
+#define SYSCALL_EXIT(name, r, sc, str, ...)	\
+    if ((r=sc) == -1) {				\
+	perror(#name);				\
+	int errno_copy = errno;			\
+	print_error(str, __VA_ARGS__);		\
+	exit(errno_copy);			\
+    }
+
+#define SYSCALL_PRINT(name, r, sc, str, ...)	\
+    if ((r=sc) == -1) {				\
+	perror(#name);				\
+	int errno_copy = errno;			\
+	print_error(str, __VA_ARGS__);		\
+	errno = errno_copy;			\
+    }
+
+#define SYSCALL_RETURN(name, r, sc, str, ...)	\
+    if ((r=sc) == -1) {				\
+	perror(#name);				\
+	int errno_copy = errno;			\
+	print_error(str, __VA_ARGS__);		\
+	errno = errno_copy;			\
+	return r;                               \
+    }
+
+#define CHECK_EQ_EXIT(name, X, val, str, ...)	\
+    if ((X)==val) {				\
+        perror(#name);				\
+	int errno_copy = errno;			\
+	print_error(str, __VA_ARGS__);		\
+	exit(errno_copy);			\
+    }
+
+#define CHECK_NEQ_EXIT(name, X, val, str, ...)	\
+    if ((X)!=val) {				\
+        perror(#name);				\
+	int errno_copy = errno;			\
+	print_error(str, __VA_ARGS__);		\
+	exit(errno_copy);			\
+    }
+
+/**
+ * \brief Procedura di utilita' per la stampa degli errori
+ *
+ */
+static inline void print_error(const char * str, ...) {
+    const char err[]="ERROR: ";
+    va_list argp;
+    char * p=(char *)malloc(strlen(str)+strlen(err)+EXTRA_LEN_PRINT_ERROR);
+    if (!p) {
+        perror("malloc");
+        fprintf(stderr,"FATAL ERROR nella funzione 'print_error'\n");
+        return;
+    }
+    strcpy(p,err);
+    strcpy(p+strlen(err), str);
+    va_start(argp, str);
+    vfprintf(stderr, p, argp);
+    va_end(argp);
+    free(p);
+}
+
+
+/**
+ * \brief Controlla se la stringa passata come primo argomento e' un numero.
+ * \return  0 ok  1 non e' un numbero   2 overflow/underflow
+ */
+static inline int isNumber(const char* s, long* n) {
+    if (s==NULL) return 1;
+    if (strlen(s)==0) return 1;
+    char* e = NULL;
+    errno=0;
+    long val = strtol(s, &e, 10);
+    if (errno == ERANGE) return 2;    // overflow/underflow
+    if (e != NULL && *e == (char)0) {
+        *n = val;
+        return 0;   // successo
+    }
+    return 1;   // non e' un numero
+}
+
+#define LOCK(l)      if (pthread_mutex_lock(l)!=0)        { \
+    fprintf(stderr, "ERRORE FATALE lock\n");		    \
+    pthread_exit((void*)EXIT_FAILURE);			    \
+  }
+#define UNLOCK(l)    if (pthread_mutex_unlock(l)!=0)      { \
+  fprintf(stderr, "ERRORE FATALE unlock\n");		    \
+  pthread_exit((void*)EXIT_FAILURE);				    \
+  }
+#define WAIT(c,l)    if (pthread_cond_wait(c,l)!=0)       { \
+    fprintf(stderr, "ERRORE FATALE wait\n");		    \
+    pthread_exit((void*)EXIT_FAILURE);				    \
+}
+/* ATTENZIONE: t e' un tempo assoluto! */
+#define TWAIT(c,l,t) {							\
+    int r=0;								\
+    if ((r=pthread_cond_timedwait(c,l,t))!=0 && r!=ETIMEDOUT) {		\
+      fprintf(stderr, "ERRORE FATALE timed wait\n");			\
+      pthread_exit((void*)EXIT_FAILURE);					\
+    }									\
+  }
+#define SIGNAL(c)    if (pthread_cond_signal(c)!=0)       {	\
+    fprintf(stderr, "ERRORE FATALE signal\n");			\
+    pthread_exit((void*)EXIT_FAILURE);					\
+  }
+#define BCAST(c)     if (pthread_cond_broadcast(c)!=0)    {		\
+    fprintf(stderr, "ERRORE FATALE broadcast\n");			\
+    pthread_exit((void*)EXIT_FAILURE);						\
+  }
+static inline int TRYLOCK(pthread_mutex_t* l) {
+    int r=0;
+    if ((r=pthread_mutex_trylock(l))!=0 && r!=EBUSY) {
+        fprintf(stderr, "ERRORE FATALE unlock\n");
+        pthread_exit((void*)EXIT_FAILURE);
+    }
+    return r;
+}
 
 // Global variables
 buffer_item buffer[BUFFER_SIZE];
@@ -71,6 +274,52 @@ int socket_desc, client_sock, client_size;
 struct sockaddr_un server_addr, client_addr;
 char server_message[2000], client_message[2000];
 int i=0;
+
+
+#define CHECKNULL(r,c,e) CHECK_EQ_EXIT(e, (r=c), NULL,e,"")
+
+/**
+ * tipo del messaggio
+ */
+typedef struct msg {
+    int len;
+    char *str;
+} msg_t;
+
+
+void cleanup() {
+    unlink(SOCKNAME);
+}
+int cmd(const char str[], char *buf) {
+    int tobc[2];
+    int frombc[2];
+
+    int notused;
+    SYSCALL_EXIT("pipe", notused, pipe(tobc), "pipe1", "");
+    SYSCALL_EXIT("pipe", notused, pipe(frombc), "pipe2","");
+
+    if (fork() == 0) {
+        // chiudo i descrittori che non uso
+        SYSCALL_EXIT("close", notused, close(tobc[1]), "close", "");
+        SYSCALL_EXIT("close", notused, close(frombc[0]), "close", "");
+
+        SYSCALL_EXIT("dup2", notused, dup2(tobc[0],0),   "dup2 child (1)", "");  // stdin
+        SYSCALL_EXIT("dup2", notused, dup2(frombc[1],1), "dup2 child (2)", "");  // stdout
+        SYSCALL_EXIT("dup2", notused, dup2(frombc[1],2), "dup2 child (3)", "");  // stderr
+
+        execl("/usr/bin/bc", "bc", "-l", NULL);
+        return -1;
+    }
+    // chiudo i descrittori che non uso
+    SYSCALL_EXIT("close", notused, close(tobc[0]), "close","");
+    SYSCALL_EXIT("close", notused, close(frombc[1]), "close","");
+    int n;
+    SYSCALL_EXIT("write", n, write(tobc[1], (char*)str,strlen(str)), "writen","");
+    SYSCALL_EXIT("read",  n, read(frombc[0], buf, BUFSIZE), "readn","");  // leggo il risultato o l'errore
+    SYSCALL_EXIT("close", notused, close(tobc[1]), "close","");  // si chiude lo standard input di bc cosi' da farlo terminare
+    SYSCALL_EXIT("wait", notused, wait(NULL), "wait","");
+    return n;
+}
 
 void *job_of_masterWorker();
 void *job_of_worker();
@@ -144,111 +393,7 @@ void *Consumer(void *arg) {
     }
     printf("Consumer %d, consumed <%ld> messages, now it exits\n", myid, consumed);
 }
-static int quiet=0;
 
-int isdot(const char dir[]) {
-    int l = strlen(dir);
-    if ( (l>0 && dir[l-1] == '.') ) return 1;
-    return 0;
-}
-
-//fa solo la malloc per buff
-char* cwd() {
-    char* buf = malloc(NAME_MAX*sizeof(char));
-    if (!buf) {
-        perror("cwd malloc");
-        return NULL;
-    }
-    if (getcwd(buf, NAME_MAX) == NULL) {
-        if (errno==ERANGE) { // il buffer e' troppo piccolo, lo allargo
-            char* buf2 = realloc(buf, 2*NAME_MAX*sizeof(char));
-            if (!buf2) {
-                perror("cwd realloc");
-                free(buf);
-                return NULL;
-            }
-            buf = buf2;
-            if (getcwd(buf,2*NAME_MAX)==NULL) { // mi arrendo....
-                if (!quiet) perror("cwd eseguendo getcwd");
-                free(buf);
-                return NULL;
-            }
-        } else {
-            if (!quiet) perror("cwd eseguendo getcwd");
-            free(buf);
-            return NULL;
-        }
-    }
-    return buf;
-}
-
-char *strremove(char *str, const char *sub) {
-    size_t len = strlen(sub);
-    if (len > 0) {
-        char *p = str;
-        while ((p = strstr(p, sub)) != NULL) {
-            memmove(p, p + len, strlen(p + len) + 1);
-        }
-    }
-    return str;
-}
-
-int find(const char nomedir[], const char nomefile[]) {
-    // entro nella directory cosi' da poter fare opendir(".")
-    if (chdir(nomedir) == -1) {
-        if (!quiet) printf("Impossibile entrare nella directory %s\n", nomedir);
-        return 0;
-    }
-    DIR *dir;
-    if ((dir = opendir(".")) == NULL) {
-        if (!quiet) printf("Errore aprendo la directory %s\n", nomedir);
-        return -1;
-    } else {
-        struct dirent *file;
-        while ((errno = 0, file = readdir(dir)) != NULL) {
-            struct stat statbuf;
-            if (stat(file->d_name, &statbuf) == -1) {
-                if (!quiet) {
-                    perror("stat");
-                    printf("Errore facendo stat di %s\n", file->d_name);
-                }
-                return -1;
-            }
-            if (S_ISDIR(statbuf.st_mode)) {
-                if (!isdot(file->d_name)) {//se è una cartella interna
-                    if (find(file->d_name, nomefile) != 0) {
-                        //entro nelle sottodirectories
-                        if (chdir("..") == -1) {
-                            printf("Impossibile risalire alla directory padre.\n");
-                            return -1;
-                        }
-                    }
-                }
-            } else {//se è un file entro qui
-                if (strncmp(file->d_name, nomefile, strlen(nomefile)) == 0) {
-                    char *buf = cwd();
-                    printf("buf: %s\n\n",buf);
-                    char *pos = strrchr(buf, 'SOL');
-                    printf("POS%s\n", pos);
-                    char* res= malloc(sizeof(char)*100);
-                    res=strremove(pos,"L/");
-                    printf("RES: %s\n\n",res);
-
-                    char*rest=malloc(sizeof(char)*100);
-                    if (buf == NULL) return -1;
-                    strcat(rest,res);
-                    strcat(rest,"/");
-                    strcat(rest,file->d_name);
-                    printf("REST: %s",rest);
-                    free(buf);
-                }
-            }
-        }
-        if (errno != 0) perror("readdir");
-        closedir(dir);
-    }
-    return 1;
-}
 
 //comandi del parser
 int parser(int argc, char*argv[]){
@@ -335,151 +480,144 @@ int main(int argc, char* argv []){
     //gestione parser
     parser(argc, argv);
 
-    find("pluto","ciao1.txt");
-
 
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
     //faccio il parsing degli argomenti
- /*   extern char *optarg;
-    int p=1,c=numberThreads, n=lenghtTail;//è il numero dei messaggi/dei file da mandare
-    printf("num producers =%d, num consumers =%d\n", p, c);
-    pthread_t    *th;
-    threadArgs_t *thARGS;
-    th     = malloc((p+c)*sizeof(pthread_t));
-    thARGS = malloc((p+c)*sizeof(threadArgs_t));
-    if (!th || !thARGS) {
-        fprintf(stderr, "malloc fallita\n");
-        exit(EXIT_FAILURE);
-    }
-    //è la lista che invio al producer per inserire i vari elementi
-    llist *lista_da_inviare= malloc((sizeof(llist)));
-    Queue_t *q = initQueue();
-    //ho riempito la lista da inviare al consumer
-    listdir("pluto",0,lista_da_inviare);
-    //print_list(lista_da_inviare);
-    if (!q) {
-        fprintf(stderr, "initQueue fallita\n");
-        exit(errno);
-    }
-    int chunk = n/p, r= n%p;
-    int start = 0;
-
-    //inizializzo la struttura per il producer
-    for(int i=0;i<p; ++i) {
-        thARGS[i].thid = i;
-        thARGS[i].q    = q;
-        thARGS[i].start= start;
-        thARGS[i].stop = start+chunk + ((i<r)?1:0);
-        start = thARGS[i].stop;
-        thARGS[i].list_file_MasterWorker=lista_da_inviare;
-    }
-
-    //inizializzo la struttura per il worker
-    for(int i=p;i<(p+c); ++i) {
-        thARGS[i].thid = i-p;
-        thARGS[i].q    = q;
-        thARGS[i].start= 0;
-        thARGS[i].stop = 0;
-        thARGS[i].list_file_MasterWorker=lista_da_inviare;
-    }
-
-    // è il produttore con la coda già piena
-    if (pthread_create(&th, NULL, Producer, (void*)&thARGS[i]) != 0) {
-        fprintf(stderr, "pthread_create failed (Producer)\n");
-        exit(EXIT_FAILURE);
-    }
-
-    //sono i workers
-    for(int i=0;i<c; ++i)
-        if (pthread_create(&th[p+i], NULL, Consumer, (void*)&thARGS[p+i]) != 0) {
-            fprintf(stderr, "pthread_create failed (Consumer)\n");
-            exit(EXIT_FAILURE);
-        }
-    /* possibile protocollo di terminazione:
-     * si aspettano prima tutti i produttori
-     * quindi si inviano 'c' valori speciali (-1)
-     * quindi si aspettano i consumatori
-     */
+    /*   extern char *optarg;
+       int p=1,c=numberThreads, n=lenghtTail;//è il numero dei messaggi/dei file da mandare
+       printf("num producers =%d, num consumers =%d\n", p, c);
+       pthread_t    *th;
+       threadArgs_t *thARGS;
+       th     = malloc((p+c)*sizeof(pthread_t));
+       thARGS = malloc((p+c)*sizeof(threadArgs_t));
+       if (!th || !thARGS) {
+           fprintf(stderr, "malloc fallita\n");
+           exit(EXIT_FAILURE);
+       }
+       //è la lista che invio al producer per inserire i vari elementi
+       llist *lista_da_inviare= malloc((sizeof(llist)));
+       Queue_t *q = initQueue();
+       //ho riempito la lista da inviare al consumer
+       listdir("pluto",0,lista_da_inviare);
+       //print_list(lista_da_inviare);
+       if (!q) {
+           fprintf(stderr, "initQueue fallita\n");
+           exit(errno);
+       }
+       int chunk = n/p, r= n%p;
+       int start = 0;
+       //inizializzo la struttura per il producer
+       for(int i=0;i<p; ++i) {
+           thARGS[i].thid = i;
+           thARGS[i].q    = q;
+           thARGS[i].start= start;
+           thARGS[i].stop = start+chunk + ((i<r)?1:0);
+           start = thARGS[i].stop;
+           thARGS[i].list_file_MasterWorker=lista_da_inviare;
+       }
+       //inizializzo la struttura per il worker
+       for(int i=p;i<(p+c); ++i) {
+           thARGS[i].thid = i-p;
+           thARGS[i].q    = q;
+           thARGS[i].start= 0;
+           thARGS[i].stop = 0;
+           thARGS[i].list_file_MasterWorker=lista_da_inviare;
+       }
+       // è il produttore con la coda già piena
+       if (pthread_create(&th, NULL, Producer, (void*)&thARGS[i]) != 0) {
+           fprintf(stderr, "pthread_create failed (Producer)\n");
+           exit(EXIT_FAILURE);
+       }
+       //sono i workers
+       for(int i=0;i<c; ++i)
+           if (pthread_create(&th[p+i], NULL, Consumer, (void*)&thARGS[p+i]) != 0) {
+               fprintf(stderr, "pthread_create failed (Consumer)\n");
+               exit(EXIT_FAILURE);
+           }
+       /* possibile protocollo di terminazione:
+        * si aspettano prima tutti i produttori
+        * quindi si inviano 'c' valori speciali (-1)
+        * quindi si aspettano i consumatori
+        */
     // aspetto prima il produttore
- /*   printf("join produttore\n\n");
-    pthread_join(th, NULL);
-
-    printf("join workers");
-    //qui ho un problemone da guardare
-    // aspetto la terminazione di tutti i consumatori
-    for(int i=0;i<c; ++i){
-        pthread_join(th[p+i], NULL);
-    }
-    // libero memoria
-    deleteQueue(q);
-    free(th);
-    free(thARGS);
-*/
+    /*   printf("join produttore\n\n");
+       pthread_join(th, NULL);
+       printf("join workers");
+       //qui ho un problemone da guardare
+       // aspetto la terminazione di tutti i consumatori
+       for(int i=0;i<c; ++i){
+           pthread_join(th[p+i], NULL);
+       }
+       // libero memoria
+       deleteQueue(q);
+       free(th);
+       free(thARGS);
+   */
     printf("fine main\n");
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-    //comunicazione con collector
-    server_addr.sun_family=AF_UNIX;
+    // cancello il socket file se esiste
+    cleanup();
+    // se qualcosa va storto ....
+    atexit(cleanup);
 
-    // Clean buffers:
-    memset(server_message, '\0', sizeof(server_message));
-    memset(client_message, '\0', sizeof(client_message));
+    int listenfd;
+    // creo il socket
+    SYSCALL_EXIT("socket", listenfd, socket(AF_UNIX, SOCK_STREAM, 0), "socket","");
 
-    // Create socket:
-    socket_desc = socket(AF_UNIX, SOCK_STREAM, 0);
+    // setto l'indirizzo
+    struct sockaddr_un serv_addr;
+    memset(&serv_addr, '0', sizeof(serv_addr));
+    serv_addr.sun_family = AF_UNIX;
+    strncpy(serv_addr.sun_path, SOCKNAME, strlen(SOCKNAME)+1);
 
-    if(socket_desc == -1 && errno == EINTR){
-        printf("Error while creating socket\n");
-        return -1;
-    }
-    printf("Socket created successfully\n");
+    int notused;
+    // assegno l'indirizzo al socket
+    SYSCALL_EXIT("bind", notused, bind(listenfd, (struct sockaddr*)&serv_addr,sizeof(serv_addr)), "bind", "");
 
-    // Bind to the set port and IP:
-    if(bind(socket_desc, (struct sockaddr*)&server_addr, sizeof(server_addr))== -1 && errno==EINTR){
-        printf("Couldn't bind to the port\n");
-        return -1;
-    }
-    printf("Done with binding\n");
+    // setto il socket in modalita' passiva e definisco un n. massimo di connessioni pendenti
+    SYSCALL_EXIT("listen", notused, listen(listenfd, 1), "listen","");
 
-    // Listen for clients:
-    if(listen(socket_desc, SOMAXCONN)== -1 && errno == EINTR ){
-        printf("Error while listening\n");
-        return -1;
-    }
-    printf("\nListening for incoming connections.....\n");
+    int connfd, n;
+    do {
+        SYSCALL_EXIT("accept", connfd, accept(listenfd, (struct sockaddr*)NULL ,NULL), "accept","");
 
+        msg_t str;
+        CHECKNULL(str.str,malloc(BUFSIZE), "malloc");
+        while(1) {
+            char buffer[BUFSIZE];
 
-    // Accept an incoming connection:
-    client_size = sizeof(client_addr);
-    client_sock = accept(socket_desc, (struct sockaddr*)&client_addr, &client_size);
+            memset(str.str, '\0', BUFSIZE);
+            // leggo la size della stringa
+            SYSCALL_EXIT("readn", n, readn(connfd, &str.len, sizeof(int)), "readn1", "");
+            // leggo la stringa
+            SYSCALL_EXIT("readn", n, readn(connfd, str.str, str.len), "readn2", "");
+            if (n==0) break;
+            memset(buffer, '\0', BUFSIZE);
+            if ((n = cmd(str.str, buffer)) < 0) {
+                fprintf(stderr, "Errore nell'esecuzione del comando\n");
+                break;
+            }
+            buffer[n] = '\0';
 
-    if (client_sock < 0){
-        printf("Can't accept\n");
-        return -1;
-    }
-    //printf("Client connected at IP: %s and port: %i\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
-
-    // Receive client's message:
-    if (recv(client_sock, client_message, sizeof(client_message), 0) < 0){
-        printf("Couldn't receive\n");
-        return -1;
-    }
-    printf("Msg from client: %s\n", client_message);
-
-    // Respond to client:
-    strcpy(server_message, "This is the server's message.");
-
-    if (send(client_sock, server_message, strlen(server_message), 0) < 0){
-        printf("Can't send\n");
-        return -1;
-    }
-
-    // Closing the socket:
-    close(client_sock);
-    close(socket_desc);
-
+            // invio la risposta
+#if 1
+            SYSCALL_EXIT("writen", notused, writen(connfd, &n, sizeof(int)), "writen1", "");
+            SYSCALL_EXIT("writen", notused, writen(connfd, buffer, n), "writen2", "");
+#else
+            // qui si puo' utilizzare anche writev (man 2 writev) invece che 2 write distinte
+	// NOTA: andrebbe implementata una writevn per evitare le "scritture parziali",
+	//       l'implementazione e' un po' piu' complessa della writen
+	struct iovec iov[2] = { {&n, sizeof(int)}, {buffer, n} };
+	SYSCALL_EXIT("writev", notused, writev(connfd, iov, 2), "writev", "");
+#endif
+        }
+        close(connfd);
+        printf("connection done\n");
+        if (str.str) free(str.str);
+    } while(1);
     return 0;
 }
 

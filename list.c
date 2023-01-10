@@ -196,6 +196,7 @@ void listdir(const char *name, int indent,struct llist *l){
 }
 
 void Look_for_file(char* filename, char* directorydipartenza, int indent, file_structure *path_risultato){
+    //printf("entro nella look\n\n");
     DIR *dir;
     struct dirent *entry;
     if (!(dir = opendir(directorydipartenza))){
@@ -218,6 +219,7 @@ void Look_for_file(char* filename, char* directorydipartenza, int indent, file_s
             }
         }
     }
+    //printf("esco dalla funzione\n\n");
     closedir(dir);
  //   printf("path nell funzione %s\n\n",path_risultato);
 }

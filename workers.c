@@ -85,15 +85,6 @@ int sommatoria(char *nome_del_file){
     printf("nome del file nella sommatoria:%s\n\n",nome_del_file);
     char *str= nome_del_file;
     int init_size = strlen(str);
-   /* char delim[] = "";
-
-    char *ptr = strtok(str, delim);
-
-    while (ptr != NULL)
-    {
-        printf("ptr: %s\n", ptr);
-        ptr = strtok(NULL, delim);
-    }*/
     myFile = fopen(nome_del_file, "r");
     int lenght_of_files= lenght_file(nome_del_file);
     //read file into array

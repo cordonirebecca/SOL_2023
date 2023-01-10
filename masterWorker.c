@@ -19,6 +19,7 @@
 #include<dirent.h>
 #include <stdbool.h>
 #include "workers.h"
+#define SOCKNAME "./mysock"
 #define UNIX_PATH_MAX 255
 #include <arpa/inet.h>
 #include<semaphore.h>
@@ -36,6 +37,7 @@
     }
 typedef int buffer_item;
 #define BUFFER_SIZE 5
+#define N 100
 // Global variables
 buffer_item buffer[BUFFER_SIZE];
 pthread_mutex_t mutex;
@@ -172,6 +174,7 @@ int main(int argc, char* argv []){
     pthread_t tid;
     pthread_t ptid;
     char* file_preso;
+    char buf[N];
     //creo thread che si occupa della maschera segnali
     if(	pthread_create(&maskProducer, NULL, signalMask, NULL)!=0){
         perror(" error in function pthread_create of signalMask");
@@ -283,10 +286,8 @@ int main(int argc, char* argv []){
     printf("fine main\n");
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     //comunicazione con collector
+    strncpy(server_addr.sun_path,SOCKNAME,UNIX_PATH_MAX);
     server_addr.sun_family=AF_UNIX;
-    // Clean buffers:
-    memset(server_message, '\0', sizeof(server_message));
-    memset(client_message, '\0', sizeof(client_message));
     // Create socket:
     socket_desc = socket(AF_UNIX, SOCK_STREAM, 0);
     if(socket_desc == -1 && errno == EINTR){
@@ -308,26 +309,17 @@ int main(int argc, char* argv []){
     printf("\nListening for incoming connections.....\n");
     // Accept an incoming connection:
     client_size = sizeof(client_addr);
-    client_sock = accept(socket_desc, (struct sockaddr*)&client_addr, &client_size);
+    client_sock = accept(socket_desc, NULL,0);
     if (client_sock < 0){
         printf("Can't accept\n");
         return -1;
     }
-    //printf("Client connected at IP: %s and port: %i\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
-    // Receive client's message:
-    if (recv(client_sock, client_message, sizeof(client_message), 0) < 0){
-        printf("Couldn't receive\n");
-        return -1;
-    }
-    printf("Msg from client: %s\n", client_message);
-    // Respond to client:
-    strcpy(server_message, "This is the server's message.");
-    if (send(client_sock, server_message, strlen(server_message), 0) < 0){
-        printf("Can't send\n");
-        return -1;
-    }
-    // Closing the socket:
-    close(client_sock);
+    read(client_sock,buf,N);
+    printf("server got: %s\n\n",buf);
+    write(client_sock,"bye!",5);
     close(socket_desc);
+    close(client_sock);
+    exit(EXIT_SUCCESS);
+
     return 0;
 }

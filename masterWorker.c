@@ -266,7 +266,6 @@ int main(int argc, char* argv []){
             exit(EXIT_FAILURE);
             }
     }
-
     // aspetto prima il produttore
     /*  printf("join produttore\n\n");
     pthread_join(th, NULL);
@@ -283,35 +282,52 @@ int main(int argc, char* argv []){
     */
     printf("fine main\n");
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-      //COMUNICAZIONE SOCKET
-      
-    // create server socket similar to what was done in
-    // client program
-    int servSockD = socket(AF_INET, SOCK_STREAM, 0);
-
-    // string store data to send to client
-    char serMsg[255] = "Message from the server to the "
-                       "client \'Hello Client\' ";
-
-    // define server address
-    struct sockaddr_in servAddr;
-
-    servAddr.sin_family = AF_INET;
-    servAddr.sin_port = htons(9001);
-    servAddr.sin_addr.s_addr = INADDR_ANY;
-
-    // bind socket to the specified IP and port
-    bind(servSockD, (struct sockaddr*)&servAddr,
-         sizeof(servAddr));
-
-    // listen for connections
-    listen(servSockD, 1);
-
-    // integer to hold client socket.
-    int clientSocket = accept(servSockD, NULL, NULL);
-
-    // send's messages to client socket
-    send(clientSocket, serMsg, sizeof(serMsg), 0);
-
+    //comunicazione con collector
+    server_addr.sun_family=AF_UNIX;
+    // Clean buffers:
+    memset(server_message, '\0', sizeof(server_message));
+    memset(client_message, '\0', sizeof(client_message));
+    // Create socket:
+    socket_desc = socket(AF_UNIX, SOCK_STREAM, 0);
+    if(socket_desc == -1 && errno == EINTR){
+        printf("Error while creating socket\n");
+        return -1;
+    }
+    printf("Socket created successfully\n");
+    // Bind to the set port and IP:
+    if(bind(socket_desc, (struct sockaddr*)&server_addr, sizeof(server_addr))== -1 && errno==EINTR){
+        printf("Couldn't bind to the port\n");
+        return -1;
+    }
+    printf("Done with binding\n");
+    // Listen for clients:
+    if(listen(socket_desc, SOMAXCONN)== -1 && errno == EINTR ){
+        printf("Error while listening\n");
+        return -1;
+    }
+    printf("\nListening for incoming connections.....\n");
+    // Accept an incoming connection:
+    client_size = sizeof(client_addr);
+    client_sock = accept(socket_desc, (struct sockaddr*)&client_addr, &client_size);
+    if (client_sock < 0){
+        printf("Can't accept\n");
+        return -1;
+    }
+    //printf("Client connected at IP: %s and port: %i\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+    // Receive client's message:
+    if (recv(client_sock, client_message, sizeof(client_message), 0) < 0){
+        printf("Couldn't receive\n");
+        return -1;
+    }
+    printf("Msg from client: %s\n", client_message);
+    // Respond to client:
+    strcpy(server_message, "This is the server's message.");
+    if (send(client_sock, server_message, strlen(server_message), 0) < 0){
+        printf("Can't send\n");
+        return -1;
+    }
+    // Closing the socket:
+    close(client_sock);
+    close(socket_desc);
     return 0;
 }
